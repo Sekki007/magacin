@@ -125,20 +125,25 @@ export default function InventoryDashboard() {
   }
 
   // Realtime za rezervacije
-  useEffect(() => {
-    if (!currentUser || currentUser.uloga !== 'admin') return
+useEffect(() => {
+  if (!currentUser || currentUser.uloga !== 'admin') return
 
-    const channel = supabase
-      .channel('rezervacije-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rezervacije' }, () => {
+  const channel = supabase
+    .channel('rezervacije-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'rezervacije' },
+      () => {
         ucitajRezervacije()
-      })
-      .subscribe()
+      }
+    )
+    .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [currentUser])
+  return () => {
+    void supabase.removeChannel(channel)
+  }
+}, [currentUser])
+
 
   useEffect(() => {
     getCurrentUser()
