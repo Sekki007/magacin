@@ -57,7 +57,7 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-10 rounded-xl shadow-2xl w-96">
-        <h2 className="text-3xl font-bold mb-8 text-center">Interni Inventory Sistem</h2>
+        <h2 className="text-3xl font-bold mb-8 text-center">Prijava Magacin v1.0</h2>
         <form onSubmit={handleLogin} className="space-y-6">
           <input
             type="text"
