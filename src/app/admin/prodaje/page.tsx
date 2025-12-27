@@ -10,7 +10,7 @@ import {
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon,
-  XMarkIcon
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 
 export default function PregledProdaja() {
@@ -30,77 +30,110 @@ export default function PregledProdaja() {
   const [loadingReset, setLoadingReset] = useState(false)
 
   useEffect(() => {
-    async function check() {
+    async function checkAuthAndLoadData() {
+      // 1. Proveri sesiju
       const { data: { session } } = await supabase.auth.getSession()
+
       if (!session) {
         router.push('/login')
         return
       }
-      const { data } = await supabase.from('profiles').select('uloga').eq('id', session.user.id).single()
-      if (data.uloga !== 'admin') {
+
+      // 2. Proveri ulogu admina
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('uloga')
+        .eq('id', session.user.id)
+        .single()
+
+      if (profileError || !profile) {
+        console.error('Greška pri dohvatanju profila ili profil ne postoji:', profileError)
         router.push('/')
         return
       }
-      setCurrentUser(data)
 
-      const { data: p } = await supabase
+      if (profile.uloga !== 'admin') {
+        router.push('/')
+        return
+      }
+
+      // 3. Postavi trenutnog korisnika
+      setCurrentUser(profile)
+
+      // 4. Učitaj prodaje
+      const { data: p, error: prodajeError } = await supabase
         .from('prodaje')
         .select('*, artikli(naziv)')
         .order('datum', { ascending: false })
 
-      setProdaje(p || [])
-      setFiltered(p || [])
+      if (prodajeError) {
+        console.error('Greška pri učitavanju prodaja:', prodajeError)
+        setProdaje([])
+        setFiltered([])
+      } else {
+        setProdaje(p || [])
+        setFiltered(p || [])
+      }
     }
-    check()
+
+    checkAuthAndLoadData()
   }, [router])
 
-  // Filtriranje
+  // Filtriranje po pretrazi i datumima
   useEffect(() => {
-    let temp = prodaje
+    let temp = [...prodaje]
 
     if (pretraga) {
-      temp = temp.filter(p =>
-        p.artikli?.naziv.toLowerCase().includes(pretraga.toLowerCase()) ||
-        p.prodavac_username.toLowerCase().includes(pretraga.toLowerCase())
+      const lowerPretraga = pretraga.toLowerCase()
+      temp = temp.filter(
+        (p) =>
+          p.artikli?.naziv?.toLowerCase().includes(lowerPretraga) ||
+          p.prodavac_username?.toLowerCase().includes(lowerPretraga)
       )
     }
 
     if (datumOd) {
-      temp = temp.filter(p => new Date(p.datum) >= new Date(datumOd))
+      const odDate = new Date(datumOd)
+      temp = temp.filter((p) => new Date(p.datum) >= odDate)
     }
+
     if (datumDo) {
-      temp = temp.filter(p => new Date(p.datum) <= new Date(datumDo + 'T23:59:59'))
+      const doDate = new Date(datumDo + 'T23:59:59')
+      temp = temp.filter((p) => new Date(p.datum) <= doDate)
     }
 
     setFiltered(temp)
-    setPage(1)
+    setPage(1) // resetuj stranicu kad se promene filteri
   }, [pretraga, datumOd, datumDo, prodaje])
 
-  if (!currentUser) return <div className="p-10 text-center text-xl">Učitavanje...</div>
+  if (!currentUser) {
+    return <div className="p-10 text-center text-xl">Učitavanje...</div>
+  }
 
-  const ukupnaZarada = filtered.reduce((sum, p) => sum + p.ukupna_zarada, 0)
+  const ukupnaZarada = filtered.reduce((sum, p) => sum + (p.ukupna_zarada || 0), 0)
   const paginated = filtered.slice((page - 1) * perPage, page * perPage)
   const totalPages = Math.ceil(filtered.length / perPage)
 
   // Export u CSV
   function exportCSV() {
     const headers = ['Datum', 'Artikal', 'Količina', 'Cena po kom', 'Zarada', 'Prodao']
-    const rows = filtered.map(p => [
+    const rows = filtered.map((p) => [
       new Date(p.datum).toLocaleString('sr-RS'),
       p.artikli?.naziv || 'Nepoznato',
-      p.kolicina_prodato,
-      p.cena_po_komadu.toFixed(2),
-      p.ukupna_zarada.toFixed(2),
-      `${p.prodavac_username} (${p.uloga_prodavac})`
+      p.kolicina_prodato || 0,
+      (p.cena_po_komadu || 0).toFixed(2),
+      (p.ukupna_zarada || 0).toFixed(2),
+      `${p.prodavac_username || 'Nepoznato'} (${p.uloga_prodavac || 'nepoznato'})`,
     ])
 
-    const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
+    const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `prodaje_${new Date().toLocaleDateString('sr-RS')}.csv`
     a.click()
+    URL.revokeObjectURL(url)
   }
 
   // Reset svih prodaja
@@ -110,20 +143,26 @@ export default function PregledProdaja() {
   }
 
   async function izvrsiResetProdaja() {
-    if (resetCode !== '1234') { // ← PROMIJENI U SVOJ SIGURNOSNI KOD
+    if (resetCode !== '1234') {
       alert('Pogrešan kod! Reset otkazan.')
       return
     }
 
     setLoadingReset(true)
     try {
-      await supabase.from('prodaje').delete().neq('id', '00000000-0000-0000-0000-000000000000') // briše sve
+      const { error } = await supabase
+        .from('prodaje')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000') // sigurno briše sve
+
+      if (error) throw error
+
       setProdaje([])
       setFiltered([])
       alert('Sve prodaje su uspešno obrisane!')
     } catch (err) {
-      alert('Greška pri brisanju prodaja!')
-      console.error(err)
+      console.error('Greška pri brisanju:', err)
+      alert('Došlo je do greške pri brisanju prodaja!')
     } finally {
       setLoadingReset(false)
       setShowResetConfirm(false)
@@ -133,14 +172,12 @@ export default function PregledProdaja() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
-
         {/* Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-8 rounded-xl shadow-lg mb-8">
           <h1 className="text-4xl font-bold mb-6 flex items-center gap-4 justify-center">
             <CurrencyEuroIcon className="w-12 h-12" />
             Pregled svih prodaja
           </h1>
-
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 text-center mb-8">
             <div className="bg-white/10 backdrop-blur rounded-lg p-4">
               <p className="text-indigo-100 text-lg">Broj prodaja</p>
@@ -158,7 +195,6 @@ export default function PregledProdaja() {
                 <ArrowDownTrayIcon className="w-6 h-6" />
                 Preuzmi CSV
               </button>
-
               <a
                 href="/admin/obavestenja"
                 className="bg-orange-600 hover:bg-orange-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-3"
@@ -180,7 +216,7 @@ export default function PregledProdaja() {
                 type="text"
                 placeholder="Pretraži po artiklu ili prodavcu..."
                 value={pretraga}
-                onChange={e => setPretraga(e.target.value)}
+                onChange={(e) => setPretraga(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-4 focus:ring-indigo-300"
               />
             </div>
@@ -189,7 +225,7 @@ export default function PregledProdaja() {
               <input
                 type="date"
                 value={datumOd}
-                onChange={e => setDatumOd(e.target.value)}
+                onChange={(e) => setDatumOd(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-4 focus:ring-indigo-300"
               />
             </div>
@@ -198,7 +234,7 @@ export default function PregledProdaja() {
               <input
                 type="date"
                 value={datumDo}
-                onChange={e => setDatumDo(e.target.value)}
+                onChange={(e) => setDatumDo(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-4 focus:ring-indigo-300"
               />
             </div>
@@ -216,7 +252,7 @@ export default function PregledProdaja() {
           </div>
         </div>
 
-        {/* Tabela prodaja */}
+        {/* Tabela */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-10">
           <div className="p-6 border-b bg-gray-50">
             <h2 className="text-2xl font-bold flex items-center gap-3">
@@ -244,14 +280,19 @@ export default function PregledProdaja() {
                     </td>
                   </tr>
                 ) : (
-                  paginated.map(p => (
+                  paginated.map((p) => (
                     <tr key={p.id} className="border-t hover:bg-gray-50 transition">
                       <td className="p-4 text-sm">{new Date(p.datum).toLocaleString('sr-RS')}</td>
                       <td className="p-4 font-medium">{p.artikli?.naziv || 'Nepoznato'}</td>
-                      <td className="p-4 text-right font-bold">{p.kolicina_prodato}</td>
-                      <td className="p-4 text-right">{p.cena_po_komadu.toFixed(2)} €</td>
-                      <td className="p-4 text-right font-bold text-green-600">{p.ukupna_zarada.toFixed(2)} €</td>
-                      <td className="p-4">{p.prodavac_username} <span className="text-gray-500">({p.uloga_prodavac})</span></td>
+                      <td className="p-4 text-right font-bold">{p.kolicina_prodato || 0}</td>
+                      <td className="p-4 text-right">{(p.cena_po_komadu || 0).toFixed(2)} €</td>
+                      <td className="p-4 text-right font-bold text-green-600">
+                        {(p.ukupna_zarada || 0).toFixed(2)} €
+                      </td>
+                      <td className="p-4">
+                        {p.prodavac_username || 'Nepoznato'}{' '}
+                        <span className="text-gray-500">({p.uloga_prodavac || 'nepoznato'})</span>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -263,7 +304,7 @@ export default function PregledProdaja() {
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 flex justify-center gap-4">
               <button
-                onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
                 disabled={page === 1}
                 className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
@@ -273,7 +314,7 @@ export default function PregledProdaja() {
                 Strana {page} od {totalPages}
               </span>
               <button
-                onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
                 disabled={page === totalPages}
                 className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
@@ -293,7 +334,7 @@ export default function PregledProdaja() {
           </button>
         </div>
 
-        {/* Modal za reset prodaja */}
+        {/* Modal za reset */}
         {showResetConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
@@ -306,7 +347,7 @@ export default function PregledProdaja() {
               <input
                 type="text"
                 value={resetCode}
-                onChange={e => setResetCode(e.target.value)}
+                onChange={(e) => setResetCode(e.target.value)}
                 placeholder="Unesi kod (1234)"
                 className="w-full p-4 border-2 border-red-300 rounded-lg text-xl text-center mb-6 focus:outline-none focus:ring-4 focus:ring-red-300"
                 autoFocus
