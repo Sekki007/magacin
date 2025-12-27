@@ -16,12 +16,16 @@ import {
   ChartBarIcon,
   XMarkIcon,
   ClockIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
+
+// Moguće uloge korisnika
+type Uloga = 'admin' | 'kolega' | 'serviser' | 'lager'
 
 export default function InventoryDashboard() {
   const router = useRouter()
-  const [currentUser, setCurrentUser] = useState<{ username: string; uloga: string } | null>(null)
+
+  const [currentUser, setCurrentUser] = useState<{ username: string; uloga: Uloga } | null>(null)
   const [artikli, setArtikli] = useState<any[]>([])
   const [rezervacije, setRezervacije] = useState<any[]>([])
   const [pretraga, setPretraga] = useState('')
@@ -71,14 +75,15 @@ export default function InventoryDashboard() {
     'IPHONE LCD ORG',
     'BATERIJE IPHONE',
     'BATERIJE VERIFY',
-    'Ostalo'
+    'Ostalo',
   ]
 
-  const ulogaBoja = {
+  // Boje za uloge – tip Record<Uloga, string> rešava TypeScript problem
+  const ulogaBoja: Record<Uloga, string> = {
     admin: 'bg-indigo-600',
     kolega: 'bg-green-600',
     serviser: 'bg-orange-600',
-    lager: 'bg-gray-600'
+    lager: 'bg-gray-600',
   }
 
   async function getCurrentUser() {
@@ -87,7 +92,6 @@ export default function InventoryDashboard() {
       router.push('/login')
       return
     }
-
     const { data, error } = await supabase
       .from('profiles')
       .select('username, uloga')
@@ -99,8 +103,7 @@ export default function InventoryDashboard() {
       router.push('/login')
       return
     }
-
-    setCurrentUser(data)
+    setCurrentUser(data as { username: string; uloga: Uloga })
   }
 
   async function ucitajArtikle() {
@@ -124,26 +127,23 @@ export default function InventoryDashboard() {
     setRezervacije(data || [])
   }
 
-  // Realtime za rezervacije
-useEffect(() => {
-  if (!currentUser || currentUser.uloga !== 'admin') return
+  // Realtime za rezervacije (samo za admina)
+  useEffect(() => {
+    if (!currentUser || currentUser.uloga !== 'admin') return
 
-  const channel = supabase
-    .channel('rezervacije-changes')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'rezervacije' },
-      () => {
-        ucitajRezervacije()
-      }
-    )
-    .subscribe()
+    const channel = supabase
+      .channel('rezervacije-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rezervacije' },
+        () => ucitajRezervacije()
+      )
+      .subscribe()
 
-  return () => {
-    void supabase.removeChannel(channel)
-  }
-}, [currentUser])
-
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [currentUser])
 
   useEffect(() => {
     getCurrentUser()
@@ -172,9 +172,7 @@ useEffect(() => {
         setLoading(false)
         return
       }
-
       const zarada = prodajaArtikal.osnovna_cena * prodajaKolicina
-
       await Promise.all([
         supabase.from('artikli').update({ kolicina: prodajaArtikal.kolicina - prodajaKolicina }).eq('id', prodajaArtikal.id),
         supabase.from('prodaje').insert({
@@ -183,13 +181,14 @@ useEffect(() => {
           cena_po_komadu: prodajaArtikal.osnovna_cena,
           ukupna_zarada: zarada,
           prodavac_username: currentUser?.username,
-          uloga_prodavac: 'admin'
+          uloga_prodavac: 'admin',
         }),
-        supabase.from('kasa').update({ stanje_zarada: stanjeKase + zarada }).eq('id', 1)
+        supabase.from('kasa').update({ stanje_zarada: stanjeKase + zarada }).eq('id', 1),
       ])
-
-      setArtikli(prev => prev.map(a => a.id === prodajaArtikal.id ? { ...a, kolicina: a.kolicina - prodajaKolicina } : a))
-      setStanjeKase(prev => prev + zarada)
+      setArtikli((prev) =>
+        prev.map((a) => (a.id === prodajaArtikal.id ? { ...a, kolicina: a.kolicina - prodajaKolicina } : a))
+      )
+      setStanjeKase((prev) => prev + zarada)
       alert(`Prodato ${prodajaKolicina} × ${prodajaArtikal.naziv}\nZarada: ${zarada.toFixed(2)} €`)
     } catch (err) {
       alert('Greška pri prodaji!')
@@ -217,18 +216,18 @@ useEffect(() => {
         setLoading(false)
         return
       }
-
       await Promise.all([
         supabase.from('artikli').update({ kolicina: rezArtikal.kolicina - rezKolicina }).eq('id', rezArtikal.id),
         supabase.from('rezervacije').insert({
           artikal_id: rezArtikal.id,
           kolicina: rezKolicina,
           kome: rezKome.trim(),
-          napomena: rezNapomena.trim() || null
-        })
+          napomena: rezNapomena.trim() || null,
+        }),
       ])
-
-      setArtikli(prev => prev.map(a => a.id === rezArtikal.id ? { ...a, kolicina: a.kolicina - rezKolicina } : a))
+      setArtikli((prev) =>
+        prev.map((a) => (a.id === rezArtikal.id ? { ...a, kolicina: a.kolicina - rezKolicina } : a))
+      )
       ucitajRezervacije()
       alert(`Rezervisano ${rezKolicina} × ${rezArtikal.naziv} za "${rezKome}"`)
     } catch (err) {
@@ -253,20 +252,21 @@ useEffect(() => {
             cena_po_komadu: rez.artikli.osnovna_cena,
             ukupna_zarada: zarada,
             prodavac_username: currentUser?.username,
-            uloga_prodavac: 'admin'
-          })
+            uloga_prodavac: 'admin',
+          }),
         ])
-        setStanjeKase(prev => prev + zarada)
+        setStanjeKase((prev) => prev + zarada)
         alert(`Plaćeno i razduženo: ${rez.kolicina} × ${rez.artikli.naziv}\nZarada: ${zarada.toFixed(2)} €`)
       } else {
-        const artikal = artikli.find(a => a.id === rez.artikal_id)
+        const artikal = artikli.find((a) => a.id === rez.artikal_id)
         if (artikal) {
           await supabase.from('artikli').update({ kolicina: artikal.kolicina + rez.kolicina }).eq('id', rez.artikal_id)
-          setArtikli(prev => prev.map(a => a.id === rez.artikal_id ? { ...a, kolicina: a.kolicina + rez.kolicina } : a))
+          setArtikli((prev) =>
+            prev.map((a) => (a.id === rez.artikal_id ? { ...a, kolicina: a.kolicina + rez.kolicina } : a))
+          )
         }
         alert(`Vraćeno na lager: ${rez.kolicina} × ${rez.artikli.naziv}`)
       }
-
       await supabase.from('rezervacije').update({ razduzeno: true }).eq('id', rez.id)
       ucitajRezervacije()
     } catch (err) {
@@ -283,11 +283,10 @@ useEffect(() => {
   }
 
   async function izvrsiResetKase() {
-    if (resetCode !== '1234') { // ← PROMIJENI U SVOJ SIGURNOSNI KOD
+    if (resetCode !== '1234') {
       alert('Pogrešan kod! Reset otkazan.')
       return
     }
-
     setLoading(true)
     try {
       await supabase.from('kasa').update({ stanje_zarada: 0 }).eq('id', 1)
@@ -305,7 +304,6 @@ useEffect(() => {
   async function sacuvajArtikal(e: React.FormEvent) {
     e.preventDefault()
     if (currentUser?.uloga !== 'admin') return
-
     setLoading(true)
     try {
       const payload = {
@@ -314,16 +312,14 @@ useEffect(() => {
         cena_serviser: Number(serviser),
         cena_kolega: Number(kolega),
         kolicina: Number(kolicina),
-        kategorija: kategorija || null
+        kategorija: kategorija || null,
       }
-
       if (editId) {
         await supabase.from('artikli').update(payload).eq('id', editId)
         setEditId(null)
       } else {
         await supabase.from('artikli').insert(payload)
       }
-
       setPoruka(editId ? 'Izmenjeno!' : 'Dodato!')
       resetForme()
       ucitajArtikle()
@@ -373,13 +369,12 @@ useEffect(() => {
     router.push('/login')
   }
 
-  const artikliNaIzmaku = artikli.filter(a => a.kolicina <= 1)
-
-  const filtrirani = artikli.filter(a =>
-    a.naziv.toLowerCase().includes(pretraga.toLowerCase()) &&
-    (!filterKategorija || a.kategorija === filterKategorija)
+  const artikliNaIzmaku = artikli.filter((a) => a.kolicina <= 1)
+  const filtrirani = artikli.filter(
+    (a) =>
+      a.naziv.toLowerCase().includes(pretraga.toLowerCase()) &&
+      (!filterKategorija || a.kategorija === filterKategorija)
   )
-
   const paginated = filtrirani.slice((page - 1) * perPage, page * perPage)
   const totalPages = Math.ceil(filtrirani.length / perPage)
 
@@ -397,7 +392,6 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
-
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6 rounded-xl shadow-lg gap-4">
           <div className="flex items-center gap-4">
@@ -406,7 +400,11 @@ useEffect(() => {
               <h1 className="text-2xl font-bold">Magacin v1.0</h1>
               <div className="flex items-center gap-3 mt-1">
                 <span className="text-lg">Ulogovan: {currentUser.username}</span>
-                <span className={`px-4 py-1 rounded-full text-white font-semibold ${ulogaBoja[currentUser.uloga] || 'bg-gray-600'}`}>
+                <span
+                  className={`px-4 py-1 rounded-full text-white font-semibold ${
+                    ulogaBoja[currentUser.uloga] || 'bg-gray-600'
+                  }`}
+                >
                   {currentUser.uloga.toUpperCase()}
                 </span>
               </div>
@@ -422,7 +420,6 @@ useEffect(() => {
                   <ChartBarIcon className="w-5 h-5" />
                   Pregled prodaja
                 </a>
-
                 <button
                   onClick={() => setShowKriticniModal(true)}
                   className="relative flex items-center gap-2 bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg font-medium transition"
@@ -435,7 +432,6 @@ useEffect(() => {
                     </span>
                   )}
                 </button>
-
                 <button
                   onClick={() => setShowRezervisaniModal(true)}
                   className="relative flex items-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition"
@@ -450,7 +446,6 @@ useEffect(() => {
                 </button>
               </>
             )}
-
             <button
               onClick={logout}
               className="flex items-center gap-2 bg-red-600 hover:bg-red-700 px-6 py-2 rounded-lg font-medium transition"
@@ -483,7 +478,10 @@ useEffect(() => {
               </div>
             </div>
             <div className="bg-gradient-to-br from-red-500 to-red-600 p-6 rounded-xl text-white shadow-lg flex items-center justify-center">
-              <button onClick={otvoriResetConfirm} className="flex items-center gap-3 bg-white/20 hover:bg-white/30 px-8 py-4 rounded-lg font-bold transition w-full justify-center">
+              <button
+                onClick={otvoriResetConfirm}
+                className="flex items-center gap-3 bg-white/20 hover:bg-white/30 px-8 py-4 rounded-lg font-bold transition w-full justify-center"
+              >
                 <ArrowPathIcon className="w-6 h-6" /> Resetuj kasu
               </button>
             </div>
@@ -498,17 +496,27 @@ useEffect(() => {
               type="text"
               placeholder="Pretraži artikle..."
               value={pretraga}
-              onChange={e => { setPretraga(e.target.value); setPage(1) }}
+              onChange={(e) => {
+                setPretraga(e.target.value)
+                setPage(1)
+              }}
               className="w-full pl-12 pr-6 py-4 border border-gray-300 rounded-xl text-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 shadow-md"
             />
           </div>
           <select
             value={filterKategorija}
-            onChange={e => { setFilterKategorija(e.target.value); setPage(1) }}
+            onChange={(e) => {
+              setFilterKategorija(e.target.value)
+              setPage(1)
+            }}
             className="p-4 border border-gray-300 rounded-xl text-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 shadow-md"
           >
             <option value="">Sve kategorije</option>
-            {kategorije.map(k => <option key={k} value={k}>{k}</option>)}
+            {kategorije.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -530,21 +538,74 @@ useEffect(() => {
                   {editId ? 'Izmeni artikal' : 'Dodaj novi artikal'}
                 </h2>
                 <form onSubmit={sacuvajArtikal} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <input placeholder="Naziv artikla" value={naziv} onChange={e => setNaziv(e.target.value)} required className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300" />
-                  <input type="number" placeholder="Nabavna cena (€)" value={osnovna} onChange={e => setOsnovna(e.target.value)} required className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300" />
-                  <input type="number" placeholder="Cena za serviser (€)" value={serviser} onChange={e => setServiser(e.target.value)} required className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300" />
-                  <input type="number" placeholder="Cena za kolegu (€)" value={kolega} onChange={e => setKolega(e.target.value)} required className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300" />
-                  <input type="number" placeholder="Količina" value={kolicina} onChange={e => setKolicina(e.target.value)} required className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300" />
-                  <select value={kategorija} onChange={e => setKategorija(e.target.value)} className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300">
+                  <input
+                    placeholder="Naziv artikla"
+                    value={naziv}
+                    onChange={(e) => setNaziv(e.target.value)}
+                    required
+                    className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Nabavna cena (€)"
+                    value={osnovna}
+                    onChange={(e) => setOsnovna(e.target.value)}
+                    required
+                    className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Cena za serviser (€)"
+                    value={serviser}
+                    onChange={(e) => setServiser(e.target.value)}
+                    required
+                    className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Cena za kolegu (€)"
+                    value={kolega}
+                    onChange={(e) => setKolega(e.target.value)}
+                    required
+                    className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Količina"
+                    value={kolicina}
+                    onChange={(e) => setKolicina(e.target.value)}
+                    required
+                    className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300"
+                  />
+                  <select
+                    value={kategorija}
+                    onChange={(e) => setKategorija(e.target.value)}
+                    className="p-4 border rounded-lg focus:ring-4 focus:ring-indigo-300"
+                  >
                     <option value="">Izaberi kategoriju</option>
-                    {kategorije.map(k => <option key={k} value={k}>{k}</option>)}
+                    {kategorije.map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
                   </select>
                   <div className="lg:col-span-3 flex gap-4">
-                    <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white py-4 px-8 rounded-lg font-bold transition flex items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white py-4 px-8 rounded-lg font-bold transition flex items-center gap-3"
+                    >
                       <PlusIcon className="w-6 h-6" />
-                      {loading ? 'Čuvanje...' : (editId ? 'Sačuvaj izmene' : 'Dodaj artikal')}
+                      {loading ? 'Čuvanje...' : editId ? 'Sačuvaj izmene' : 'Dodaj artikal'}
                     </button>
-                    <button type="button" onClick={() => { setShowForm(false); resetForme() }} className="bg-gray-600 hover:bg-gray-700 text-white py-4 px-8 rounded-lg font-bold transition">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false)
+                        resetForme()
+                      }}
+                      className="bg-gray-600 hover:bg-gray-700 text-white py-4 px-8 rounded-lg font-bold transition"
+                    >
                       Otkaži
                     </button>
                   </div>
@@ -577,9 +638,9 @@ useEffect(() => {
             </h2>
           </div>
 
-          {/* Mobilni kartice */}
+          {/* Mobilni prikaz */}
           <div className="block lg:hidden">
-            {paginated.map(art => (
+            {paginated.map((art) => (
               <div key={art.id} className="border-b border-gray-200 p-4 hover:bg-gray-50 transition">
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="font-bold text-lg">{art.naziv}</h3>
@@ -628,7 +689,7 @@ useEffect(() => {
                 </tr>
               </thead>
               <tbody>
-                {paginated.map(art => (
+                {paginated.map((art) => (
                   <tr key={art.id} className="border-t hover:bg-gray-50 transition">
                     <td className="p-4 font-medium">{art.naziv}</td>
                     <td className="p-4 text-sm text-gray-600">{new Date(art.created_at).toLocaleDateString('sr-RS')}</td>
@@ -664,7 +725,7 @@ useEffect(() => {
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-4">
               <button
-                onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
                 disabled={page === 1}
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition disabled:cursor-not-allowed"
               >
@@ -674,7 +735,7 @@ useEffect(() => {
                 Strana {page} od {totalPages} ({filtrirani.length} artikala)
               </span>
               <button
-                onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
                 disabled={page === totalPages}
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition disabled:cursor-not-allowed"
               >
@@ -683,6 +744,9 @@ useEffect(() => {
             </div>
           )}
         </div>
+
+        {/* Svi modali (prodaja, rezervacija, kritični, rezervisani, reset kase) */}
+        {/* ... (ostaju identični tvom originalnom kodu – kopirani su u celosti ranije u ovom fajlu) */}
 
         {/* Modal za prodaju */}
         {showProdaja && prodajaArtikal && (
@@ -709,7 +773,7 @@ useEffect(() => {
                   min="1"
                   max={prodajaArtikal.kolicina}
                   value={prodajaKolicina}
-                  onChange={e => setProdajaKolicina(Math.min(Number(e.target.value) || 1, prodajaArtikal.kolicina))}
+                  onChange={(e) => setProdajaKolicina(Math.min(Number(e.target.value) || 1, prodajaArtikal.kolicina))}
                   className="w-full p-4 border-2 border-gray-300 rounded-lg text-xl text-center focus:border-green-500"
                 />
                 <p className="text-right mt-3 text-lg">
@@ -717,11 +781,19 @@ useEffect(() => {
                 </p>
               </div>
               <div className="flex gap-4">
-                <button onClick={izvrsiProdaju} disabled={loading} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-4 px-8 rounded-lg font-bold transition flex items-center justify-center gap-3">
+                <button
+                  onClick={izvrsiProdaju}
+                  disabled={loading}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-4 px-8 rounded-lg font-bold transition flex items-center justify-center gap-3"
+                >
                   <ShoppingBagIcon className="w-6 h-6" />
                   {loading ? 'Prodaja u toku...' : 'Prodaj'}
                 </button>
-                <button onClick={() => setShowProdaja(false)} disabled={loading} className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-4 px-8 rounded-lg font-bold transition">
+                <button
+                  onClick={() => setShowProdaja(false)}
+                  disabled={loading}
+                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-4 px-8 rounded-lg font-bold transition"
+                >
                   Otkaži
                 </button>
               </div>
@@ -754,7 +826,7 @@ useEffect(() => {
                     min="1"
                     max={rezArtikal.kolicina}
                     value={rezKolicina}
-                    onChange={e => setRezKolicina(Math.min(Number(e.target.value) || 1, rezArtikal.kolicina))}
+                    onChange={(e) => setRezKolicina(Math.min(Number(e.target.value) || 1, rezArtikal.kolicina))}
                     className="w-full p-4 border-2 border-gray-300 rounded-lg text-xl text-center"
                   />
                 </div>
@@ -763,7 +835,7 @@ useEffect(() => {
                   <input
                     type="text"
                     value={rezKome}
-                    onChange={e => setRezKome(e.target.value)}
+                    onChange={(e) => setRezKome(e.target.value)}
                     placeholder="Ime mušterije/kolege"
                     className="w-full p-4 border-2 border-gray-300 rounded-lg"
                     required
@@ -773,7 +845,7 @@ useEffect(() => {
                   <label className="block text-lg font-medium mb-2">Napomena (opcionalno):</label>
                   <textarea
                     value={rezNapomena}
-                    onChange={e => setRezNapomena(e.target.value)}
+                    onChange={(e) => setRezNapomena(e.target.value)}
                     placeholder="Npr. za sutra, probati kod kuće..."
                     className="w-full p-4 border-2 border-gray-300 rounded-lg"
                     rows={3}
@@ -818,14 +890,20 @@ useEffect(() => {
                 <p className="text-center text-gray-600 py-8 text-lg">Svi artikli su na zadovoljavajućem stanju. 👍</p>
               ) : (
                 <div className="grid gap-4">
-                  {artikliNaIzmaku.map(art => (
+                  {artikliNaIzmaku.map((art) => (
                     <div key={art.id} className="bg-red-50 p-4 rounded-lg flex justify-between items-center">
                       <div>
                         <p className="font-semibold text-lg">{art.naziv}</p>
                         <p className="text-red-600 font-bold">Količina: {art.kolicina}</p>
                         <p className="text-sm text-gray-500">Unos: {new Date(art.created_at).toLocaleDateString('sr-RS')}</p>
                       </div>
-                      <button onClick={() => { setShowKriticniModal(false); izmeniArtikal(art) }} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition">
+                      <button
+                        onClick={() => {
+                          setShowKriticniModal(false)
+                          izmeniArtikal(art)
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition"
+                      >
                         Dopuni
                       </button>
                     </div>
@@ -853,17 +931,35 @@ useEffect(() => {
                 <p className="text-center text-gray-600 py-8 text-lg">Nema aktivnih rezervacija.</p>
               ) : (
                 <div className="grid gap-4">
-                  {rezervacije.map(rez => (
+                  {rezervacije.map((rez) => (
                     <div key={rez.id} className="bg-purple-50 p-4 rounded-lg flex flex-col gap-2">
-                      <p className="font-semibold text-lg">{rez.kolicina} × {rez.artikli.naziv}</p>
-                      <p>Dat: <span className="font-medium">{rez.kome}</span></p>
+                      <p className="font-semibold text-lg">
+                        {rez.kolicina} × {rez.artikli.naziv}
+                      </p>
+                      <p>
+                        Dat: <span className="font-medium">{rez.kome}</span>
+                      </p>
                       {rez.napomena && <p className="italic">"{rez.napomena}"</p>}
-                      <p className="text-sm text-gray-500">Datum: {new Date(rez.datum_rezervacije).toLocaleDateString('sr-RS')}</p>
+                      <p className="text-sm text-gray-500">
+                        Datum: {new Date(rez.datum_rezervacije).toLocaleDateString('sr-RS')}
+                      </p>
                       <div className="flex gap-3 mt-3">
-                        <button onClick={() => { setShowRezervisaniModal(false); razduziRezervaciju(rez, true) }} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium transition">
+                        <button
+                          onClick={() => {
+                            setShowRezervisaniModal(false)
+                            razduziRezervaciju(rez, true)
+                          }}
+                          className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium transition"
+                        >
                           Plaćeno
                         </button>
-                        <button onClick={() => { setShowRezervisaniModal(false); razduziRezervaciju(rez, false) }} className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg font-medium transition">
+                        <button
+                          onClick={() => {
+                            setShowRezervisaniModal(false)
+                            razduziRezervaciju(rez, false)
+                          }}
+                          className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg font-medium transition"
+                        >
                           Vrati na lager
                         </button>
                       </div>
@@ -884,23 +980,29 @@ useEffect(() => {
               <input
                 type="text"
                 value={resetCode}
-                onChange={e => setResetCode(e.target.value)}
+                onChange={(e) => setResetCode(e.target.value)}
                 placeholder="Unesi kod (1234)"
                 className="w-full p-4 border-2 border-red-300 rounded-lg text-xl text-center mb-6"
                 autoFocus
               />
               <div className="flex gap-4">
-                <button onClick={izvrsiResetKase} disabled={loading} className="flex-1 bg-red-600 hover:bg-red-700 text-white py-4 rounded-lg font-bold transition">
+                <button
+                  onClick={izvrsiResetKase}
+                  disabled={loading}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-4 rounded-lg font-bold transition"
+                >
                   {loading ? 'Reset u toku...' : 'Potvrdi reset'}
                 </button>
-                <button onClick={() => setShowResetConfirm(false)} className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-4 rounded-lg font-bold transition">
+                <button
+                  onClick={() => setShowResetConfirm(false)}
+                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-4 rounded-lg font-bold transition"
+                >
                   Otkaži
                 </button>
               </div>
             </div>
           </div>
         )}
-
       </div>
     </div>
   )
