@@ -239,10 +239,8 @@ export default function InventoryDashboard() {
   async function razduziRezervaciju(rez: any, placeno: boolean) {
     setLoading(true)
     try {
-      // Dohvati nabavnu cenu iz join-a ili iz artikala
       const osnovnaCena = rez.artikli?.osnovna_cena || artikli.find(a => a.id === rez.artikal_id)?.osnovna_cena || 0
       const zarada = osnovnaCena * rez.kolicina
-
       if (placeno) {
         await Promise.all([
           supabase.from('kasa').update({ stanje_zarada: stanjeKase + zarada }).eq('id', 1),
@@ -934,18 +932,24 @@ export default function InventoryDashboard() {
                     </thead>
                     <tbody>
                       {(() => {
-                        const poKategorijama = artikli.reduce((acc, art) => {
+                        const poKategorijama = artikli.reduce<Record<string, { broj: number; vrednost: number }>>((acc, art) => {
                           const kat = art.kategorija || 'Bez kategorije'
-                          if (!acc[kat]) acc[kat] = { broj: 0, vrednost: 0 }
+                          if (!acc[kat]) {
+                            acc[kat] = { broj: 0, vrednost: 0 }
+                          }
                           acc[kat].broj += 1
                           acc[kat].vrednost += art.osnovna_cena * art.kolicina
                           return acc
-                        }, {} as Record<string, { broj: number; vrednost: number }>)
+                        }, {})
 
                         const sortirano = Object.entries(poKategorijama).sort((a, b) => b[1].vrednost - a[1].vrednost)
 
                         return sortirano.length === 0 ? (
-                          <tr><td colSpan={4} className="p-8 text-center text-gray-500">Nema artikala na lageru</td></tr>
+                          <tr>
+                            <td colSpan={4} className="p-8 text-center text-gray-500">
+                              Nema artikala na lageru
+                            </td>
+                          </tr>
                         ) : (
                           sortirano.map(([kat, data]) => {
                             const procenat = novacULageru > 0 ? (data.vrednost / novacULageru) * 100 : 0
