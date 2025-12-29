@@ -1,5 +1,4 @@
 'use client'
-
 import { supabase } from '@/lib/supabase'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -24,46 +23,34 @@ export default function PregledProdaja() {
   const [page, setPage] = useState(1)
   const perPage = 20
 
-  // Reset prodaja sa sigurnosnim kodom
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetCode, setResetCode] = useState('')
   const [loadingReset, setLoadingReset] = useState(false)
 
   useEffect(() => {
     async function checkAuthAndLoadData() {
-      // 1. Proveri sesiju
       const { data: { session } } = await supabase.auth.getSession()
-
       if (!session) {
         router.push('/login')
         return
       }
 
-      // 2. Proveri ulogu admina
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('uloga')
         .eq('id', session.user.id)
         .single()
 
-      if (profileError || !profile) {
-        console.error('Greška pri dohvatanju profila ili profil ne postoji:', profileError)
+      if (profileError || !profile || profile.uloga !== 'admin') {
         router.push('/')
         return
       }
 
-      if (profile.uloga !== 'admin') {
-        router.push('/')
-        return
-      }
-
-      // 3. Postavi trenutnog korisnika
       setCurrentUser(profile)
 
-      // 4. Učitaj prodaje
       const { data: p, error: prodajeError } = await supabase
         .from('prodaje')
-        .select('*, artikli(naziv)')
+        .select('*, artikli(naziv, osnovna_cena)')
         .order('datum', { ascending: false })
 
       if (prodajeError) {
@@ -75,11 +62,9 @@ export default function PregledProdaja() {
         setFiltered(p || [])
       }
     }
-
     checkAuthAndLoadData()
   }, [router])
 
-  // Filtriranje po pretrazi i datumima
   useEffect(() => {
     let temp = [...prodaje]
 
@@ -103,7 +88,7 @@ export default function PregledProdaja() {
     }
 
     setFiltered(temp)
-    setPage(1) // resetuj stranicu kad se promene filteri
+    setPage(1)
   }, [pretraga, datumOd, datumDo, prodaje])
 
   if (!currentUser) {
@@ -111,20 +96,36 @@ export default function PregledProdaja() {
   }
 
   const ukupnaZarada = filtered.reduce((sum, p) => sum + (p.ukupna_zarada || 0), 0)
+
+  const ukupnaMarza = filtered.reduce((sum, p) => {
+    if (p.artikli?.osnovna_cena && p.cena_po_komadu && p.kolicina_prodato) {
+      return sum + (p.cena_po_komadu - p.artikli.osnovna_cena) * p.kolicina_prodato
+    }
+    return sum
+  }, 0)
+
   const paginated = filtered.slice((page - 1) * perPage, page * perPage)
   const totalPages = Math.ceil(filtered.length / perPage)
 
-  // Export u CSV
   function exportCSV() {
-    const headers = ['Datum', 'Artikal', 'Količina', 'Cena po kom', 'Zarada', 'Prodao']
-    const rows = filtered.map((p) => [
-      new Date(p.datum).toLocaleString('sr-RS'),
-      p.artikli?.naziv || 'Nepoznato',
-      p.kolicina_prodato || 0,
-      (p.cena_po_komadu || 0).toFixed(2),
-      (p.ukupna_zarada || 0).toFixed(2),
-      `${p.prodavac_username || 'Nepoznato'} (${p.uloga_prodavac || 'nepoznato'})`,
-    ])
+    const headers = ['Datum', 'Artikal', 'Nabavna cena', 'Prodajna cena', 'Marža po kom', 'Količina', 'Ukupna zarada', 'Ukupna marža', 'Prodao']
+    const rows = filtered.map((p) => {
+      const nabavna = p.artikli?.osnovna_cena || 0
+      const marzaPoKom = nabavna ? (p.cena_po_komadu - nabavna).toFixed(2) : '—'
+      const ukMarza = nabavna ? ((p.cena_po_komadu - nabavna) * p.kolicina_prodato).toFixed(2) : '—'
+
+      return [
+        new Date(p.datum).toLocaleString('sr-RS'),
+        p.artikli?.naziv || 'Nepoznato',
+        nabavna.toFixed(2),
+        (p.cena_po_komadu || 0).toFixed(2),
+        marzaPoKom,
+        p.kolicina_prodato || 0,
+        (p.ukupna_zarada || 0).toFixed(2),
+        ukMarza,
+        `${p.prodavac_username || 'Nepoznato'} (${p.uloga_prodavac || 'nepoznato'})`,
+      ]
+    })
 
     const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
@@ -136,7 +137,6 @@ export default function PregledProdaja() {
     URL.revokeObjectURL(url)
   }
 
-  // Reset svih prodaja
   function otvoriResetProdaja() {
     setShowResetConfirm(true)
     setResetCode('')
@@ -147,16 +147,14 @@ export default function PregledProdaja() {
       alert('Pogrešan kod! Reset otkazan.')
       return
     }
-
     setLoadingReset(true)
     try {
       const { error } = await supabase
         .from('prodaje')
         .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000') // sigurno briše sve
+        .neq('id', '00000000-0000-0000-0000-000000000000')
 
       if (error) throw error
-
       setProdaje([])
       setFiltered([])
       alert('Sve prodaje su uspešno obrisane!')
@@ -172,20 +170,25 @@ export default function PregledProdaja() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-8 rounded-xl shadow-lg mb-8">
           <h1 className="text-4xl font-bold mb-6 flex items-center gap-4 justify-center">
             <CurrencyEuroIcon className="w-12 h-12" />
             Pregled svih prodaja
           </h1>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 text-center mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-8 text-center mb-8">
             <div className="bg-white/10 backdrop-blur rounded-lg p-4">
               <p className="text-indigo-100 text-lg">Broj prodaja</p>
               <p className="text-4xl font-bold">{filtered.length}</p>
             </div>
             <div className="bg-white/10 backdrop-blur rounded-lg p-4">
-              <p className="text-indigo-100 text-lg">Ukupna zarada</p>
-              <p className="text-5xl font-bold">{ukupnaZarada.toFixed(2)} €</p>
+              <p className="text-indigo-100 text-lg">Ukupno naplaćeno</p>
+              <p className="text-4xl font-bold">{ukupnaZarada.toFixed(2)} €</p>
+            </div>
+            <div className="bg-white/10 backdrop-blur rounded-lg p-4">
+              <p className="text-indigo-100 text-lg">Ukupna marža</p>
+              <p className={`text-4xl font-bold ${ukupnaMarza >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                {ukupnaMarza.toFixed(2)} €
+              </p>
             </div>
             <div className="flex flex-col gap-3 justify-center">
               <button
@@ -206,7 +209,6 @@ export default function PregledProdaja() {
           </div>
         </div>
 
-        {/* Filteri */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">Filteri</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -239,8 +241,6 @@ export default function PregledProdaja() {
               />
             </div>
           </div>
-
-          {/* Dugme za reset prodaja */}
           <div className="mt-6 text-right">
             <button
               onClick={otvoriResetProdaja}
@@ -252,7 +252,6 @@ export default function PregledProdaja() {
           </div>
         </div>
 
-        {/* Tabela */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-10">
           <div className="p-6 border-b bg-gray-50">
             <h2 className="text-2xl font-bold flex items-center gap-3">
@@ -266,41 +265,48 @@ export default function PregledProdaja() {
                 <tr>
                   <th className="p-4 text-left">Datum i vreme</th>
                   <th className="p-4 text-left">Artikal</th>
+                  <th className="p-4 text-right">Nabavna cena</th>
+                  <th className="p-4 text-right">Prodajna cena</th>
+                  <th className="p-4 text-right">Marža po kom</th>
                   <th className="p-4 text-right">Količina</th>
-                  <th className="p-4 text-right">Cena po kom</th>
-                  <th className="p-4 text-right">Zarada</th>
+                  <th className="p-4 text-right">Ukupna zarada</th>
                   <th className="p-4 text-left">Prodao</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-10 text-center text-gray-500">
-                      Nema prodaja za izabrane filtere.
-                    </td>
-                  </tr>
+                  <tr><td colSpan={8} className="p-10 text-center text-gray-500">Nema prodaja za izabrene filtere.</td></tr>
                 ) : (
-                  paginated.map((p) => (
-                    <tr key={p.id} className="border-t hover:bg-gray-50 transition">
-                      <td className="p-4 text-sm">{new Date(p.datum).toLocaleString('sr-RS')}</td>
-                      <td className="p-4 font-medium">{p.artikli?.naziv || 'Nepoznato'}</td>
-                      <td className="p-4 text-right font-bold">{p.kolicina_prodato || 0}</td>
-                      <td className="p-4 text-right">{(p.cena_po_komadu || 0).toFixed(2)} €</td>
-                      <td className="p-4 text-right font-bold text-green-600">
-                        {(p.ukupna_zarada || 0).toFixed(2)} €
-                      </td>
-                      <td className="p-4">
-                        {p.prodavac_username || 'Nepoznato'}{' '}
-                        <span className="text-gray-500">({p.uloga_prodavac || 'nepoznato'})</span>
-                      </td>
-                    </tr>
-                  ))
+                  paginated.map((p) => {
+                    const nabavna = p.artikli?.osnovna_cena || 0
+                    const marzaPoKom = nabavna ? p.cena_po_komadu - nabavna : 0
+                    return (
+                      <tr key={p.id} className="border-t hover:bg-gray-50 transition">
+                        <td className="p-4 text-sm">{new Date(p.datum).toLocaleString('sr-RS')}</td>
+                        <td className="p-4 font-medium">{p.artikli?.naziv || 'Nepoznato'}</td>
+                        <td className="p-4 text-right">{nabavna.toFixed(2)} €</td>
+                        <td className="p-4 text-right font-bold">{(p.cena_po_komadu || 0).toFixed(2)} €</td>
+                        <td className="p-4 text-right font-medium">
+                          <span className={`font-bold ${marzaPoKom >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {marzaPoKom.toFixed(2)} €
+                          </span>
+                        </td>
+                        <td className="p-4 text-right font-bold">{p.kolicina_prodato || 0}</td>
+                        <td className="p-4 text-right font-bold text-green-600">
+                          {(p.ukupna_zarada || 0).toFixed(2)} €
+                        </td>
+                        <td className="p-4">
+                          {p.prodavac_username || 'Nepoznato'}{' '}
+                          <span className="text-gray-500">({p.uloga_prodavac || 'nepoznato'})</span>
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
-          {/* Paginacija */}
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 flex justify-center gap-4">
               <button
@@ -324,7 +330,6 @@ export default function PregledProdaja() {
           )}
         </div>
 
-        {/* Nazad dugme */}
         <div className="text-center">
           <button
             onClick={() => router.push('/')}
@@ -334,7 +339,6 @@ export default function PregledProdaja() {
           </button>
         </div>
 
-        {/* Modal za reset */}
         {showResetConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">

@@ -19,7 +19,6 @@ import {
   CalendarIcon,
 } from '@heroicons/react/24/outline'
 
-// Moguće uloge korisnika
 type Uloga = 'admin' | 'kolega' | 'serviser' | 'lager'
 
 export default function InventoryDashboard() {
@@ -33,7 +32,7 @@ export default function InventoryDashboard() {
   const [novacULageru, setNovacULageru] = useState(0)
   const [loading, setLoading] = useState(false)
 
-  // Forma za dodavanje/izmjenu
+  // Forma
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
   const [naziv, setNaziv] = useState('')
@@ -42,16 +41,16 @@ export default function InventoryDashboard() {
   const [kolega, setKolega] = useState('')
   const [kolicina, setKolicina] = useState('')
   const [kategorija, setKategorija] = useState('')
-  const [createdAt, setCreatedAt] = useState('') // Za prikaz datuma unosa
+  const [createdAt, setCreatedAt] = useState('')
   const [poruka, setPoruka] = useState('')
 
-  // Prodaja modal
+  // Prodaja
   const [showProdaja, setShowProdaja] = useState(false)
   const [prodajaArtikal, setProdajaArtikal] = useState<any | null>(null)
   const [prodajaKolicina, setProdajaKolicina] = useState(1)
-  const [prodajaCena, setProdajaCena] = useState(0) // Novo: ručna cena za prodaju
+  const [prodajaCena, setProdajaCena] = useState(0)
 
-  // Rezervacija modal
+  // Rezervacija
   const [showRezervacija, setShowRezervacija] = useState(false)
   const [rezArtikal, setRezArtikal] = useState<any | null>(null)
   const [rezKolicina, setRezKolicina] = useState(1)
@@ -62,9 +61,10 @@ export default function InventoryDashboard() {
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetCode, setResetCode] = useState('')
 
-  // Modali za obaveštenja
+  // Modali
   const [showKriticniModal, setShowKriticniModal] = useState(false)
   const [showRezervisaniModal, setShowRezervisaniModal] = useState(false)
+  const [showVrednostPoKategorijama, setShowVrednostPoKategorijama] = useState(false)
 
   // Paginacija
   const [page, setPage] = useState(1)
@@ -79,10 +79,8 @@ export default function InventoryDashboard() {
     'Ostalo',
   ]
 
-  // KATEGORIJE KOJE VIDI SAMO ADMIN
   const skrivenoZaOstale = ['BATERIJE IPHONE', 'BATERIJE VERIFY']
 
-  // Boje za uloge
   const ulogaBoja: Record<Uloga, string> = {
     admin: 'bg-indigo-600',
     kolega: 'bg-green-600',
@@ -130,7 +128,6 @@ export default function InventoryDashboard() {
     setRezervacije(data || [])
   }
 
-  // Realtime za rezervacije (samo za admina)
   useEffect(() => {
     if (!currentUser || currentUser.uloga !== 'admin') return
     const channel = supabase
@@ -158,11 +155,10 @@ export default function InventoryDashboard() {
     }
   }, [currentUser])
 
-  // Prodaja
   function otvoriProdaju(artikal: any) {
     setProdajaArtikal(artikal)
     setProdajaKolicina(1)
-    setProdajaCena(artikal.osnovna_cena) // Podrazumevana cena = nabavna
+    setProdajaCena(artikal.osnovna_cena)
     setShowProdaja(true)
   }
 
@@ -174,13 +170,13 @@ export default function InventoryDashboard() {
         setLoading(false)
         return
       }
-      const zarada = prodajaCena * prodajaKolicina // Koristi ručnu cenu!
+      const zarada = prodajaCena * prodajaKolicina
       await Promise.all([
         supabase.from('artikli').update({ kolicina: prodajaArtikal.kolicina - prodajaKolicina }).eq('id', prodajaArtikal.id),
         supabase.from('prodaje').insert({
           artikal_id: prodajaArtikal.id,
           kolicina_prodato: prodajaKolicina,
-          cena_po_komadu: prodajaCena, // Čuvaj ručnu cenu u bazi
+          cena_po_komadu: prodajaCena,
           ukupna_zarada: zarada,
           prodavac_username: currentUser?.username,
           uloga_prodavac: 'admin',
@@ -201,7 +197,6 @@ export default function InventoryDashboard() {
     }
   }
 
-  // Rezervacija
   function otvoriRezervaciju(artikal: any) {
     setRezArtikal(artikal)
     setRezKolicina(1)
@@ -244,14 +239,17 @@ export default function InventoryDashboard() {
   async function razduziRezervaciju(rez: any, placeno: boolean) {
     setLoading(true)
     try {
+      // Dohvati nabavnu cenu iz join-a ili iz artikala
+      const osnovnaCena = rez.artikli?.osnovna_cena || artikli.find(a => a.id === rez.artikal_id)?.osnovna_cena || 0
+      const zarada = osnovnaCena * rez.kolicina
+
       if (placeno) {
-        const zarada = rez.artikli.osnovna_cena * rez.kolicina
         await Promise.all([
           supabase.from('kasa').update({ stanje_zarada: stanjeKase + zarada }).eq('id', 1),
           supabase.from('prodaje').insert({
             artikal_id: rez.artikal_id,
             kolicina_prodato: rez.kolicina,
-            cena_po_komadu: rez.artikli.osnovna_cena,
+            cena_po_komadu: osnovnaCena,
             ukupna_zarada: zarada,
             prodavac_username: currentUser?.username,
             uloga_prodavac: 'admin',
@@ -272,13 +270,13 @@ export default function InventoryDashboard() {
       await supabase.from('rezervacije').update({ razduzeno: true }).eq('id', rez.id)
       ucitajRezervacije()
     } catch (err) {
-      alert('Greška!')
+      alert('Greška pri razduženju!')
+      console.error(err)
     } finally {
       setLoading(false)
     }
   }
 
-  // Reset kase
   function otvoriResetConfirm() {
     setShowResetConfirm(true)
     setResetCode('')
@@ -302,7 +300,6 @@ export default function InventoryDashboard() {
     }
   }
 
-  // Dodavanje/izmena artikla
   async function sacuvajArtikal(e: React.FormEvent) {
     e.preventDefault()
     if (currentUser?.uloga !== 'admin') return
@@ -373,19 +370,13 @@ export default function InventoryDashboard() {
     router.push('/login')
   }
 
-  // Definisanje uloga PRE filtriranja
   const isAdmin = currentUser?.uloga === 'admin'
-  const isKolega = currentUser?.uloga === 'kolega'
-  const isServiser = currentUser?.uloga === 'serviser'
-  const isLager = currentUser?.uloga === 'lager'
-
-  const prikaziCenuKolega = isAdmin || isKolega
-  const prikaziCenuServiser = isAdmin || isServiser
-  const prikaziOsnovnu = isAdmin || isLager
+  const prikaziCenuKolega = isAdmin || currentUser?.uloga === 'kolega'
+  const prikaziCenuServiser = isAdmin || currentUser?.uloga === 'serviser'
+  const prikaziOsnovnu = isAdmin || currentUser?.uloga === 'lager'
 
   const artikliNaIzmaku = artikli.filter((a) => a.kolicina <= 1)
 
-  // Filtriranje sa skrivenim kategorijama
   const filtrirani = artikli.filter((a) => {
     if (!isAdmin && a.kategorija && skrivenoZaOstale.includes(a.kategorija)) {
       return false
@@ -442,6 +433,10 @@ export default function InventoryDashboard() {
                       {rezervacije.length}
                     </span>
                   )}
+                </button>
+                <button onClick={() => setShowVrednostPoKategorijama(true)} className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 px-4 py-2 rounded-lg font-medium transition">
+                  <ChartBarIcon className="w-5 h-5" />
+                  Vrednost po kategorijama
                 </button>
               </>
             )}
@@ -564,8 +559,6 @@ export default function InventoryDashboard() {
                       ))}
                     </select>
                   </div>
-
-                  {/* Datum unosa – samo u režimu izmene */}
                   {editId && createdAt && (
                     <div className="lg:col-span-3">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Datum unosa</label>
@@ -575,7 +568,6 @@ export default function InventoryDashboard() {
                       </div>
                     </div>
                   )}
-
                   <div className="lg:col-span-3 flex gap-4">
                     <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white py-4 px-8 rounded-lg font-bold transition flex items-center gap-3">
                       <PlusIcon className="w-6 h-6" />
@@ -609,27 +601,65 @@ export default function InventoryDashboard() {
           </div>
 
           {/* Mobilni prikaz */}
-          <div className="block lg:hidden">
+          <div className="block lg:hidden space-y-4 p-4">
             {paginated.map((art) => (
-              <div key={art.id} className="border-b border-gray-200 p-4 hover:bg-gray-50 transition">
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-bold text-lg">{art.naziv}</h3>
-                  {isAdmin && (
-                    <div className="flex gap-3">
-                      <button onClick={() => otvoriProdaju(art)} className="text-green-600 hover:text-green-800"><ShoppingBagIcon className="w-6 h-6" /></button>
-                      <button onClick={() => otvoriRezervaciju(art)} className="text-orange-600 hover:text-orange-800"><ClockIcon className="w-6 h-6" /></button>
-                      <button onClick={() => izmeniArtikal(art)} className="text-blue-600 hover:text-blue-800"><PencilSquareIcon className="w-6 h-6" /></button>
-                      <button onClick={() => obrisiArtikal(art.id)} className="text-red-600 hover:text-red-800"><TrashIcon className="w-6 h-6" /></button>
+              <div
+                key={art.id}
+                className="bg-white rounded-xl shadow-md border border-gray-200 p-5 hover:shadow-lg transition-shadow"
+              >
+                <h3 className="font-extrabold text-xl text-gray-900 leading-tight mb-4">
+                  {art.naziv}
+                </h3>
+                <div className="space-y-3 mb-5">
+                  {prikaziOsnovnu && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 font-medium">Nabavna cena</span>
+                      <span className="font-bold text-lg text-gray-900">{art.osnovna_cena} €</span>
+                    </div>
+                  )}
+                  {prikaziCenuServiser && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 font-medium">Cena serviser</span>
+                      <span className="font-bold text-lg text-gray-900">{art.cena_serviser} €</span>
+                    </div>
+                  )}
+                  {prikaziCenuKolega && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 font-medium">Cena kolega</span>
+                      <span className="font-bold text-lg text-gray-900">{art.cena_kolega} €</span>
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-3 text-sm mt-3">
-                  {prikaziOsnovnu && <div><span className="font-medium">Nabavna:</span> {art.osnovna_cena} €</div>}
-                  {prikaziCenuServiser && <div><span className="font-medium">Serviser:</span> {art.cena_serviser} €</div>}
-                  {prikaziCenuKolega && <div><span className="font-medium">Kolega:</span> {art.cena_kolega} €</div>}
-                  <div className={`font-bold text-xl col-span-2 mt-3 ${art.kolicina <= 1 ? 'text-red-600' : ''}`}>
-                    Količina: {art.kolicina}
+                {isAdmin && (
+                  <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                    <button
+                      onClick={() => otvoriProdaju(art)}
+                      className="p-2 bg-green-100 rounded-lg hover:bg-green-200 transition"
+                    >
+                      <ShoppingBagIcon className="w-6 h-6 text-green-700" />
+                    </button>
+                    <button
+                      onClick={() => otvoriRezervaciju(art)}
+                      className="p-2 bg-orange-100 rounded-lg hover:bg-orange-200 transition"
+                    >
+                      <ClockIcon className="w-6 h-6 text-orange-700" />
+                    </button>
+                    <button
+                      onClick={() => izmeniArtikal(art)}
+                      className="p-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition"
+                    >
+                      <PencilSquareIcon className="w-6 h-6 text-blue-700" />
+                    </button>
+                    <button
+                      onClick={() => obrisiArtikal(art.id)}
+                      className="p-2 bg-red-100 rounded-lg hover:bg-red-200 transition"
+                    >
+                      <TrashIcon className="w-6 h-6 text-red-700" />
+                    </button>
                   </div>
+                )}
+                <div className={`text-xs font-medium text-gray-500 mt-4 text-right ${art.kolicina <= 1 ? 'text-red-600 font-bold' : ''}`}>
+                  (količina: {art.kolicina})
                 </div>
               </div>
             ))}
@@ -696,7 +726,7 @@ export default function InventoryDashboard() {
           )}
         </div>
 
-        {/* Modal za prodaju – sa novim poljem za ručnu cenu */}
+        {/* Modal za prodaju */}
         {showProdaja && prodajaArtikal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
@@ -754,7 +784,7 @@ export default function InventoryDashboard() {
           </div>
         )}
 
-        {/* Ostali modali (rezervacija, kritični, rezervisani, reset) – nepromenjeni */}
+        {/* Modal za rezervaciju */}
         {showRezervacija && rezArtikal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
@@ -805,6 +835,7 @@ export default function InventoryDashboard() {
           </div>
         )}
 
+        {/* Modal za kritično stanje */}
         {showKriticniModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full max-h-screen overflow-y-auto">
@@ -838,6 +869,7 @@ export default function InventoryDashboard() {
           </div>
         )}
 
+        {/* Modal za rezervisane artikle */}
         {showRezervisaniModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full max-h-screen overflow-y-auto">
@@ -876,6 +908,75 @@ export default function InventoryDashboard() {
           </div>
         )}
 
+        {/* Modal za vrednost po kategorijama */}
+        {showVrednostPoKategorijama && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-screen overflow-y-auto">
+              <div className="bg-gradient-to-r from-teal-600 to-teal-700 text-white p-6 rounded-t-xl flex justify-between items-center">
+                <h2 className="text-2xl font-bold flex items-center gap-3">
+                  <ChartBarIcon className="w-8 h-8" />
+                  Vrednost lagera po kategorijama
+                </h2>
+                <button onClick={() => setShowVrednostPoKategorijama(false)} className="text-white hover:text-gray-200">
+                  <XMarkIcon className="w-8 h-8" />
+                </button>
+              </div>
+              <div className="p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="p-4 text-left">Kategorija</th>
+                        <th className="p-4 text-center">Broj artikala</th>
+                        <th className="p-4 text-right">Vrednost lagera</th>
+                        <th className="p-4 text-right">Procenat</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const poKategorijama = artikli.reduce((acc, art) => {
+                          const kat = art.kategorija || 'Bez kategorije'
+                          if (!acc[kat]) acc[kat] = { broj: 0, vrednost: 0 }
+                          acc[kat].broj += 1
+                          acc[kat].vrednost += art.osnovna_cena * art.kolicina
+                          return acc
+                        }, {} as Record<string, { broj: number; vrednost: number }>)
+
+                        const sortirano = Object.entries(poKategorijama).sort((a, b) => b[1].vrednost - a[1].vrednost)
+
+                        return sortirano.length === 0 ? (
+                          <tr><td colSpan={4} className="p-8 text-center text-gray-500">Nema artikala na lageru</td></tr>
+                        ) : (
+                          sortirano.map(([kat, data]) => {
+                            const procenat = novacULageru > 0 ? (data.vrednost / novacULageru) * 100 : 0
+                            return (
+                              <tr key={kat} className="border-t hover:bg-gray-50">
+                                <td className="p-4 font-medium">{kat}</td>
+                                <td className="p-4 text-center">{data.broj}</td>
+                                <td className="p-4 text-right font-bold text-lg">{data.vrednost.toFixed(2)} €</td>
+                                <td className="p-4 text-right font-semibold text-teal-600">{procenat.toFixed(1)}%</td>
+                              </tr>
+                            )
+                          })
+                        )
+                      })()}
+                    </tbody>
+                    <tfoot className="bg-gray-100 font-bold">
+                      <tr>
+                        <td className="p-4">UKUPNO</td>
+                        <td className="p-4 text-center">{artikli.length}</td>
+                        <td className="p-4 text-right text-xl">{novacULageru.toFixed(2)} €</td>
+                        <td className="p-4 text-right">100%</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za reset kase */}
         {showResetConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
