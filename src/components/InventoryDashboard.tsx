@@ -751,11 +751,22 @@ export default function InventoryDashboard() {
                   <XMarkIcon className="w-8 h-8" />
                 </button>
               </div>
-              <div className="mb-6">
-                <p className="text-lg font-semibold">{prodajaArtikal.naziv}</p>
-                <p className="text-gray-600">Na lageru: <span className="font-bold">{prodajaArtikal.kolicina}</span></p>
-                <p className="text-gray-600 mt-2">Podrazumevana nabavna cena: <span className="font-bold">{prodajaArtikal.osnovna_cena} €</span></p>
-              </div>
+           <div className="mb-6">
+  <p className="text-lg font-semibold">{prodajaArtikal.naziv}</p>
+  <p className="text-gray-600">Na lageru: <span className="font-bold">{prodajaArtikal.kolicina}</span></p>
+  
+  {/* Prikaz ulazne cene samo ako postoji i veća je od 0 */}
+  {prodajaArtikal.ulazna_cena > 0 && (
+    <p className="text-sm text-gray-500 mt-3">
+      ulazna cena artikla je: <span className="font-semibold text-gray-700">{prodajaArtikal.ulazna_cena.toFixed(2)} €</span>
+    </p>
+  )}
+  
+  {/* Opcionalno: ako želiš da zadržiš i osnovnu cenu, ali manje vidljivo */}
+  <p className="text-sm text-gray-500 mt-1">
+    (nabavna cena: {prodajaArtikal.osnovna_cena} €)
+  </p>
+</div>
               <div className="mb-8 space-y-6">
                 <div>
                   <label className="block text-lg font-medium mb-3">Količina:</label>
