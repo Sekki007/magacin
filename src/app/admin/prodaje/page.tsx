@@ -12,9 +12,8 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 
-// === OVDE JE REŠENJE ZA BUILD GREŠKU ===
+// SAMO OVO – dovoljno je za Client Component da bude dinamičan
 export const dynamic = 'force-dynamic'
-export const revalidate = 0
 
 export default function PregledProdaja() {
   const router = useRouter()
@@ -365,7 +364,6 @@ export default function PregledProdaja() {
           </button>
         </div>
 
-        {/* Modal za brisanje svih prodaja */}
         {showResetConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
