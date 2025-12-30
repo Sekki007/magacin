@@ -43,6 +43,8 @@ export default function InventoryDashboard() {
   const [kategorija, setKategorija] = useState('')
   const [createdAt, setCreatedAt] = useState('')
   const [poruka, setPoruka] = useState('')
+  // Nova state za ulaznu cenu
+  const [ulazna, setUlazna] = useState('')
 
   // Prodaja
   const [showProdaja, setShowProdaja] = useState(false)
@@ -310,6 +312,7 @@ export default function InventoryDashboard() {
         cena_kolega: Number(kolega),
         kolicina: Number(kolicina),
         kategorija: kategorija || null,
+        ulazna_cena: ulazna ? Number(ulazna) : 0,
       }
       if (editId) {
         await supabase.from('artikli').update(payload).eq('id', editId)
@@ -337,6 +340,7 @@ export default function InventoryDashboard() {
     setKategorija('')
     setCreatedAt('')
     setPoruka('')
+    setUlazna('')
   }
 
   function otvoriZaDodavanje() {
@@ -354,6 +358,7 @@ export default function InventoryDashboard() {
     setKolicina(art.kolicina.toString())
     setKategorija(art.kategorija || '')
     setCreatedAt(art.created_at)
+    setUlazna(art.ulazna_cena?.toString() || '')
     setShowForm(true)
   }
 
@@ -372,7 +377,6 @@ export default function InventoryDashboard() {
   const prikaziCenuKolega = isAdmin || currentUser?.uloga === 'kolega'
   const prikaziCenuServiser = isAdmin || currentUser?.uloga === 'serviser'
   const prikaziOsnovnu = isAdmin || currentUser?.uloga === 'lager'
-
   const artikliNaIzmaku = artikli.filter((a) => a.kolicina <= 1)
 
   const filtrirani = artikli.filter((a) => {
@@ -557,6 +561,32 @@ export default function InventoryDashboard() {
                       ))}
                     </select>
                   </div>
+
+                  {/* Ulazna cena – samo za admina */}
+                  {isAdmin && (
+                    <div className="lg:col-span-3">
+                      <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                        <label className="block text-sm font-bold text-red-800 mb-2">
+                          Ulazna cena (koliko si TI platio dobavljaču) €
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={ulazna}
+                          onChange={(e) => setUlazna(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full p-4 border-2 border-red-400 rounded-lg focus:ring-4 focus:ring-red-300 bg-white text-lg"
+                        />
+                        <p className="text-xs text-red-700 mt-2">Ova cena je vidljiva samo adminu i služi za praćenje realne marže.</p>
+                        {ulazna && osnovna && Number(ulazna) > 0 && Number(osnovna) > 0 && (
+                          <p className="text-sm font-bold text-green-700 mt-3">
+                            Marža po komadu: <span className="text-xl">{(Number(osnovna) - Number(ulazna)).toFixed(2)} €</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {editId && createdAt && (
                     <div className="lg:col-span-3">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Datum unosa</label>
@@ -566,6 +596,7 @@ export default function InventoryDashboard() {
                       </div>
                     </div>
                   )}
+
                   <div className="lg:col-span-3 flex gap-4">
                     <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white py-4 px-8 rounded-lg font-bold transition flex items-center gap-3">
                       <PlusIcon className="w-6 h-6" />
@@ -601,13 +632,8 @@ export default function InventoryDashboard() {
           {/* Mobilni prikaz */}
           <div className="block lg:hidden space-y-4 p-4">
             {paginated.map((art) => (
-              <div
-                key={art.id}
-                className="bg-white rounded-xl shadow-md border border-gray-200 p-5 hover:shadow-lg transition-shadow"
-              >
-                <h3 className="font-extrabold text-xl text-gray-900 leading-tight mb-4">
-                  {art.naziv}
-                </h3>
+              <div key={art.id} className="bg-white rounded-xl shadow-md border border-gray-200 p-5 hover:shadow-lg transition-shadow">
+                <h3 className="font-extrabold text-xl text-gray-900 leading-tight mb-4">{art.naziv}</h3>
                 <div className="space-y-3 mb-5">
                   {prikaziOsnovnu && (
                     <div className="flex justify-between items-center">
@@ -630,28 +656,16 @@ export default function InventoryDashboard() {
                 </div>
                 {isAdmin && (
                   <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                    <button
-                      onClick={() => otvoriProdaju(art)}
-                      className="p-2 bg-green-100 rounded-lg hover:bg-green-200 transition"
-                    >
+                    <button onClick={() => otvoriProdaju(art)} className="p-2 bg-green-100 rounded-lg hover:bg-green-200 transition">
                       <ShoppingBagIcon className="w-6 h-6 text-green-700" />
                     </button>
-                    <button
-                      onClick={() => otvoriRezervaciju(art)}
-                      className="p-2 bg-orange-100 rounded-lg hover:bg-orange-200 transition"
-                    >
+                    <button onClick={() => otvoriRezervaciju(art)} className="p-2 bg-orange-100 rounded-lg hover:bg-orange-200 transition">
                       <ClockIcon className="w-6 h-6 text-orange-700" />
                     </button>
-                    <button
-                      onClick={() => izmeniArtikal(art)}
-                      className="p-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition"
-                    >
+                    <button onClick={() => izmeniArtikal(art)} className="p-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition">
                       <PencilSquareIcon className="w-6 h-6 text-blue-700" />
                     </button>
-                    <button
-                      onClick={() => obrisiArtikal(art.id)}
-                      className="p-2 bg-red-100 rounded-lg hover:bg-red-200 transition"
-                    >
+                    <button onClick={() => obrisiArtikal(art.id)} className="p-2 bg-red-100 rounded-lg hover:bg-red-200 transition">
                       <TrashIcon className="w-6 h-6 text-red-700" />
                     </button>
                   </div>
@@ -941,9 +955,7 @@ export default function InventoryDashboard() {
                           acc[kat].vrednost += art.osnovna_cena * art.kolicina
                           return acc
                         }, {})
-
                         const sortirano = Object.entries(poKategorijama).sort((a, b) => b[1].vrednost - a[1].vrednost)
-
                         return sortirano.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="p-8 text-center text-gray-500">
