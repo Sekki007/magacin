@@ -10,11 +10,11 @@ import {
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
 
-// OVDE JE KLJUČNA LINIJA – sprečava static rendering i rešava build error
+// === OVDE JE REŠENJE ZA BUILD GREŠKU ===
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export default function PregledProdaja() {
   const router = useRouter()
@@ -51,7 +51,6 @@ export default function PregledProdaja() {
 
       setCurrentUser(profile)
 
-      // Učitavamo prodaje sa podacima o artiklima (ulazna_cena je ključna za realnu maržu)
       const { data: p, error: prodajeError } = await supabase
         .from('prodaje')
         .select('*, artikli(naziv, osnovna_cena, ulazna_cena)')
@@ -84,13 +83,13 @@ export default function PregledProdaja() {
 
     if (datumOd) {
       const odDate = new Date(datumOd)
-      odDate.setHours(0, 0, 0, 0) // početak dana
+      odDate.setHours(0, 0, 0, 0)
       temp = temp.filter((p) => new Date(p.datum) >= odDate)
     }
 
     if (datumDo) {
       const doDate = new Date(datumDo)
-      doDate.setHours(23, 59, 59, 999) // kraj dana
+      doDate.setHours(23, 59, 59, 999)
       temp = temp.filter((p) => new Date(p.datum) <= doDate)
     }
 
@@ -102,10 +101,8 @@ export default function PregledProdaja() {
     return <div className="p-10 text-center text-xl">Učitavanje...</div>
   }
 
-  // Ukupno naplaćeno od kupaca
   const ukupnaZarada = filtered.reduce((sum, p) => sum + (p.ukupna_zarada || 0), 0)
 
-  // Realna marža = (prodajna cena - ulazna cena) × količina
   const ukupnaRealnaMarza = filtered.reduce((sum, p) => {
     const ulazna = p.artikli?.ulazna_cena || 0
     const prodajna = p.cena_po_komadu || 0
@@ -171,7 +168,10 @@ export default function PregledProdaja() {
 
     setLoadingReset(true)
     try {
-      const { error } = await supabase.from('prodaje').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      const { error } = await supabase
+        .from('prodaje')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000')
 
       if (error) throw error
 
@@ -190,9 +190,6 @@ export default function PregledProdaja() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* ... ceo JSX ostaje isti kao što si ga imao ... */}
-        {/* Kopiraj odavde pa do kraja iz tvog originalnog koda – sve je identično */}
-
         <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-8 rounded-xl shadow-lg mb-8">
           <h1 className="text-4xl font-bold mb-6 flex items-center gap-4 justify-center">
             <CurrencyEuroIcon className="w-12 h-12" />
@@ -232,7 +229,6 @@ export default function PregledProdaja() {
           </div>
         </div>
 
-        {/* Filteri */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">Filteri</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -276,7 +272,6 @@ export default function PregledProdaja() {
           </div>
         </div>
 
-        {/* Tabela */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-10">
           <div className="p-6 border-b bg-gray-50">
             <h2 className="text-2xl font-bold flex items-center gap-3">
@@ -338,7 +333,6 @@ export default function PregledProdaja() {
             </table>
           </div>
 
-          {/* Paginacija */}
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 flex justify-center gap-4">
               <button
@@ -362,7 +356,6 @@ export default function PregledProdaja() {
           )}
         </div>
 
-        {/* Nazad dugme */}
         <div className="text-center">
           <button
             onClick={() => router.push('/')}
@@ -372,7 +365,7 @@ export default function PregledProdaja() {
           </button>
         </div>
 
-        {/* Modal za reset */}
+        {/* Modal za brisanje svih prodaja */}
         {showResetConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
