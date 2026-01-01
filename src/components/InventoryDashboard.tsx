@@ -618,50 +618,108 @@ export default function InventoryDashboard() {
             </table>
           </div>
 
-          {/* Mobilni prikaz – cena prema ulozi */}
-          <div className="block lg:hidden space-y-4 p-4">
-            {paginated.map((art) => {
-              const Ikonica = dohvatiIkonu(art.kategorija)
-              const cenaInfo = currentUser?.uloga === 'kolega' ? { cena: art.cena_kolega, label: 'Cena kolega' } :
-                              currentUser?.uloga === 'serviser' ? { cena: art.cena_serviser, label: 'Cena serviser' } :
-                              currentUser?.uloga === 'lager' ? { cena: art.osnovna_cena, label: 'Nabavna cena' } :
-                              { cena: art.osnovna_cena, label: 'Cena' }
-              const jeKriticno = art.kolicina <= 1
-              const jeUpozorenje = art.kolicina <= 3 && art.kolicina > 1
-              return (
-                <div key={art.id} className={`bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border ${jeKriticno ? 'border-red-500' : jeUpozorenje ? 'border-orange-500' : 'border-transparent'}`}>
-                  <div className="flex items-center gap-4 mb-3">
-                    <Ikonica className={`w-10 h-10 ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : 'text-indigo-600'}`} />
-                    <div className="flex-1">
-                      <p className="font-bold text-lg text-gray-900 dark:text-white">{art.naziv}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{art.kategorija || 'Bez kategorije'}</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 text-center">
-                    <div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{cenaInfo.label}</p>
-                      <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">{cenaInfo.cena.toFixed(2)} €</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Količina</p>
-                      <p className={`text-xl font-bold ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>
-                        {art.kolicina}
-                      </p>
-                    </div>
-                  </div>
-                  {isAdmin && (
-                    <div className="flex justify-center gap-6 mt-4">
-                      <button onClick={() => otvoriProdaju(art)}><ShoppingBagIcon className="w-7 h-7 text-green-600" /></button>
-                      <button onClick={() => otvoriRezervaciju(art)}><ClockIcon className="w-7 h-7 text-orange-600" /></button>
-                      <button onClick={() => izmeniArtikal(art)}><PencilSquareIcon className="w-7 h-7 text-blue-600" /></button>
-                      <button onClick={() => obrisiArtikal(art.id)}><TrashIcon className="w-7 h-7 text-red-600" /></button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+      {/* Mobilni prikaz – lep i pregledan */}
+<div className="block lg:hidden space-y-5 px-2 pb-4">
+  {paginated.map((art) => {
+    const Ikonica = dohvatiIkonu(art.kategorija)
+    const cenaInfo = currentUser?.uloga === 'kolega' ? { cena: art.cena_kolega, label: 'Cena kolega' } :
+                    currentUser?.uloga === 'serviser' ? { cena: art.cena_serviser, label: 'Cena serviser' } :
+                    currentUser?.uloga === 'lager' ? { cena: art.osnovna_cena, label: 'Nabavna cena' } :
+                    { cena: art.osnovna_cena, label: 'Cena' }
 
+    const jeKriticno = art.kolicina <= 1
+    const jeUpozorenje = art.kolicina <= 3 && art.kolicina > 1
+
+    return (
+      <div
+        key={art.id}
+        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden border-2 transition-all ${
+          jeKriticno ? 'border-red-500 shadow-red-500/20' :
+          jeUpozorenje ? 'border-orange-500 shadow-orange-500/20' :
+          'border-gray-200 dark:border-gray-700'
+        }`}
+      >
+        {/* Gornji deo – naziv i ikona */}
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 px-5 py-4">
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-xl ${jeKriticno ? 'bg-red-100 dark:bg-red-900/50' : jeUpozorenje ? 'bg-orange-100 dark:bg-orange-900/50' : 'bg-indigo-100 dark:bg-indigo-900/50'}`}>
+              <Ikonica className={`w-8 h-8 ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : 'text-indigo-600'}`} />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xl font-extrabold text-gray-900 dark:text-white leading-tight">
+                {art.naziv}
+              </h3>
+              {art.kategorija && (
+                <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium mt-1">
+                  {art.kategorija}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Donji deo – cena i količina */}
+        <div className="px-5 py-5 bg-gray-50/70 dark:bg-gray-900/50">
+          <div className="grid grid-cols-2 gap-6">
+            {/* Cena – istaknuta */}
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                {cenaInfo.label}
+              </p>
+              <p className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-2">
+                {cenaInfo.cena.toFixed(2)} €
+              </p>
+            </div>
+
+            {/* Količina – diskretnija */}
+            <div className="text-center flex flex-col justify-center">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-500 uppercase tracking-wider">
+                Količina na lageru
+              </p>
+              <p className={`text-2xl font-bold mt-1 ${
+                jeKriticno ? 'text-red-600' :
+                jeUpozorenje ? 'text-orange-600' :
+                'text-gray-600 dark:text-gray-400'
+              }`}>
+                {art.kolicina}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Akcije – samo za admina */}
+        {isAdmin && (
+          <div className="px-5 py-4 bg-gray-100 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-700 flex justify-center gap-8">
+            <button
+              onClick={() => otvoriProdaju(art)}
+              className="p-4 bg-green-100 dark:bg-green-900/50 rounded-xl hover:bg-green-200 dark:hover:bg-green-900/70 transition shadow-md"
+            >
+              <ShoppingBagIcon className="w-7 h-7 text-green-600 dark:text-green-400" />
+            </button>
+            <button
+              onClick={() => otvoriRezervaciju(art)}
+              className="p-4 bg-orange-100 dark:bg-orange-900/50 rounded-xl hover:bg-orange-200 dark:hover:bg-orange-900/70 transition shadow-md"
+            >
+              <ClockIcon className="w-7 h-7 text-orange-600 dark:text-orange-400" />
+            </button>
+            <button
+              onClick={() => izmeniArtikal(art)}
+              className="p-4 bg-blue-100 dark:bg-blue-900/50 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-900/70 transition shadow-md"
+            >
+              <PencilSquareIcon className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+            </button>
+            <button
+              onClick={() => obrisiArtikal(art.id)}
+              className="p-4 bg-red-100 dark:bg-red-900/50 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/70 transition shadow-md"
+            >
+              <TrashIcon className="w-7 h-7 text-red-600 dark:text-red-400" />
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  })}
+</div>
           {/* Paginacija */}
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 dark:bg-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
