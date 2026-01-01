@@ -192,8 +192,8 @@ export default function InventoryDashboard() {
       ucitajKasu()
       alert(`Prodato ${prodajaKolicina} × ${prodajaArtikal.naziv}\nZarada: ${zarada.toFixed(2)} €`)
     } catch (err) {
+      console.error('Greška pri prodaji:', err)
       alert('Greška pri prodaji!')
-      console.error(err)
     } finally {
       setLoading(false)
       setShowProdaja(false)
@@ -232,8 +232,8 @@ export default function InventoryDashboard() {
       ucitajArtikle()
       alert(`Rezervisano ${rezKolicina} × ${rezArtikal.naziv} za "${rezKome}"`)
     } catch (err) {
+      console.error('Greška pri rezervaciji:', err)
       alert('Greška pri rezervaciji!')
-      console.error(err)
     } finally {
       setLoading(false)
       setShowRezervacija(false)
@@ -274,8 +274,8 @@ export default function InventoryDashboard() {
       ucitajArtikle()
       ucitajKasu()
     } catch (err) {
+      console.error('Greška pri razduženju rezervacije:', err)
       alert('Greška pri razduženju!')
-      console.error(err)
     } finally {
       setLoading(false)
     }
@@ -306,6 +306,7 @@ export default function InventoryDashboard() {
       ucitajKasu()
       setShowForm(false)
     } catch (err) {
+      console.error('Greška pri čuvanju artikal:', err)
       alert('Greška pri čuvanju!')
     } finally {
       setLoading(false)
@@ -342,8 +343,13 @@ export default function InventoryDashboard() {
 
   async function obrisiArtikal(id: string) {
     if (!confirm('Obrisati artikal?')) return
-    await supabase.from('artikli').delete().eq('id', id)
-    ucitajArtikle()
+    try {
+      await supabase.from('artikli').delete().eq('id', id)
+      ucitajArtikle()
+    } catch (err) {
+      console.error('Greška pri brisanju artikla:', err)
+      alert('Greška pri brisanju!')
+    }
   }
 
   async function logout() {
@@ -363,6 +369,7 @@ export default function InventoryDashboard() {
       alert('Kasa resetovana na 0 €')
       ucitajKasu()
     } catch (err) {
+      console.error('Greška pri resetu kase:', err)
       alert('Greška pri resetu!')
     } finally {
       setLoading(false)
@@ -772,6 +779,8 @@ export default function InventoryDashboard() {
                   </button>
                 </div>
               </div>
+
+              {/* --- FORMA: footer tasteri SU SAD UNUTAR FORME (type="submit") --- */}
               <form onSubmit={sacuvajArtikal} className="flex-1 overflow-y-auto p-6 space-y-6">
                 <div>
                   <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
@@ -882,29 +891,31 @@ export default function InventoryDashboard() {
                     </div>
                   )}
                 </div>
-              </form>
-              <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-6 py-4 rounded-b-3xl">
-                <div className="flex gap-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForm(false)
-                      setEditId(null)
-                      resetForme()
-                    }}
-                    className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-xl font-medium transition"
-                  >
-                    Otkaži
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex-1 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-70 text-white rounded-xl font-bold transition shadow-md"
-                  >
-                    {loading ? 'Čuvam...' : editId ? 'Sačuvaj' : 'Dodaj artikal'}
-                  </button>
+
+                {/* footer UNUTAR forme - submit button će aktivirati onSubmit */}
+                <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-6 py-4 rounded-b-3xl">
+                  <div className="flex gap-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false)
+                        setEditId(null)
+                        resetForme()
+                      }}
+                      className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-xl font-medium transition"
+                    >
+                      Otkaži
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="flex-1 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-70 text-white rounded-xl font-bold transition shadow-md"
+                    >
+                      {loading ? 'Čuvam...' : editId ? 'Sačuvaj' : 'Dodaj artikal'}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </form>
             </div>
           </div>
         )}
@@ -1002,6 +1013,8 @@ export default function InventoryDashboard() {
           </div>
         )}
 
+        {/* ... ostatak modala (rezervacija, kritično stanje, rezervisani, vrednost po kategorijama, reset kase) ostaje isti kao u originalnom kodu ... */}
+
         {/* MODAL ZA REZERVACIJU */}
         {showRezervacija && rezArtikal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1038,6 +1051,8 @@ export default function InventoryDashboard() {
             </div>
           </div>
         )}
+
+        {/* (Ostali modali su već u ovom fajlu iznad u originalnom kodu — zadržao sam ih neizmenjene osim dodavanja console.error u catch-evima) */}
 
         {/* MODAL ZA KRITIČNO STANJE */}
         {showKriticniModal && (
