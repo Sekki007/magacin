@@ -1,5 +1,4 @@
 'use client'
-
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -16,7 +15,6 @@ export default function Login() {
     setLoading(true)
     setError('')
 
-    // Koristimo @localhost da izbjegnemo Supabase validaciju emaila
     const email = `${username.toLowerCase().trim()}@example.com`
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -24,74 +22,99 @@ export default function Login() {
       password,
     })
 
-    // ----------------- DETALJAN ERROR LOG -----------------
     if (error) {
-      console.error('SUPABASE AUTH GREŠKA:')
-      console.error('Message:', error.message)
-      console.error('Status:', error.status)
-      console.error('Full error object:', error)
+      console.error('SUPABASE AUTH GREŠKA:', error)
 
-      // Prilagođene poruke korisniku
-      if (error.message.toLowerCase().includes('confirmed')) {
-        setError('Nalog nije potvrđen. Kontaktiraj admina ili provjeri Supabase postavke.')
-      } else if (error.message.includes('Invalid login credentials')) {
+      if (error.message.includes('Invalid login credentials')) {
         setError('Pogrešan username ili lozinka.')
-      } else if (error.message.includes('Email not confirmed')) {
-        setError('Email nije potvrđen. Isključi "Confirm email" u Supabase settings.')
+      } else if (error.message.toLowerCase().includes('confirmed')) {
+        setError('Nalog nije potvrđen. Kontaktiraj administratora.')
       } else {
         setError('Greška pri logovanju: ' + error.message)
       }
     } else {
-      // Login uspješan
       console.log('Uspješan login!', data.user)
-
-      // VIŠE NE RADIMO UPSERT – profil se kreira samo prilikom dodavanja korisnika
-      // (u UserManagement ili ručno u dashboardu), tako da uloga ostaje ista!
-
-      router.push('/')  // ili '/dashboard' ako ti je glavna stranica tamo
+      router.push('/')
     }
-
     setLoading(false)
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-10 rounded-xl shadow-2xl w-96">
-        <h2 className="text-3xl font-bold mb-8 text-center">Prijava Magacin v1.0</h2>
-        <form onSubmit={handleLogin} className="space-y-6">
-          <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-            className="w-full p-4 border rounded-lg"
-            autoFocus
-          />
-          <input
-            type="password"
-            placeholder="Lozinka"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="w-full p-4 border rounded-lg"
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-4 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-70"
-          >
-            {loading ? 'Ulazak...' : 'Uloguj se'}
-          </button>
-        </form>
-
-        {error && (
-          <div className="mt-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
-            <p className="font-semibold">Greška:</p>
-            <p>{error}</p>
-            <p className="text-sm mt-2">Otvorite konzolu (F12 → Console) za detalje.</p>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 px-4 py-12">
+      <div className="w-full max-w-md">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 sm:p-10 border border-gray-200 dark:border-gray-700">
+          {/* Naslov */}
+          <div className="text-center mb-10">
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white">
+              Magacin v1.0
+            </h2>
+            <p className="mt-3 text-lg text-gray-600 dark:text-gray-300">
+              Prijava u sistem
+            </p>
           </div>
-        )}
+
+          {/* Forma */}
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div>
+              <label htmlFor="username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Username
+              </label>
+              <input
+                id="username"
+                type="text"
+                placeholder="Unesi username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoFocus
+                className="w-full px-5 py-4 text-lg bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 dark:focus:ring-indigo-400 transition"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Lozinka
+              </label>
+              <input
+                id="password"
+                type="password"
+                placeholder="Unesi lozinku"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full px-5 py-4 text-lg bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 dark:focus:ring-indigo-400 transition"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-5 text-xl font-bold text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:opacity-70 rounded-xl shadow-lg transition transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {loading ? 'Ulazak...' : 'Uloguj se'}
+            </button>
+          </form>
+
+          {/* Greška */}
+          {error && (
+            <div className="mt-8 p-5 bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-800 rounded-xl">
+              <p className="text-red-700 dark:text-red-300 font-semibold text-center">
+                Greška
+              </p>
+              <p className="text-red-600 dark:text-red-400 text-center mt-2">
+                {error}
+              </p>
+              <p className="text-sm text-red-500 dark:text-red-400 text-center mt-3">
+                Otvori konzolu (F12) za više detalja
+              </p>
+            </div>
+          )}
+
+          {/* Footer hint */}
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-10">
+            Interni sistem • Kontaktiraj admina ako imaš problema
+          </p>
+        </div>
       </div>
     </div>
   )
