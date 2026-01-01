@@ -15,7 +15,6 @@ import {
   XMarkIcon,
   ClockIcon,
   ExclamationTriangleIcon,
-  CalendarIcon,
   DevicePhoneMobileIcon,
   Battery100Icon,
 } from '@heroicons/react/24/outline'
@@ -181,7 +180,7 @@ export default function InventoryDashboard() {
           cena_po_komadu: prodajaCena,
           ukupna_zarada: zarada,
           prodavac_username: currentUser?.username,
-          uloga_prodavac: 'admin',
+          uloga_prodavac: currentUser?.uloga,
         }),
         supabase.from('kasa').update({ stanje_zarada: stanjeKase + zarada }).eq('id', 1),
       ])
@@ -189,7 +188,9 @@ export default function InventoryDashboard() {
         prev.map((a) => (a.id === prodajaArtikal.id ? { ...a, kolicina: a.kolicina - prodajaKolicina } : a))
       )
       setStanjeKase((prev) => prev + zarada)
-      alert(`Prodato ${prodajaKolicina} × ${prodajaArtikal.naziv} po ceni ${prodajaCena} €/kom\nZarada: ${zarada.toFixed(2)} €`)
+      ucitajArtikle()
+      ucitajKasu()
+      alert(`Prodato ${prodajaKolicina} × ${prodajaArtikal.naziv}\nZarada: ${zarada.toFixed(2)} €`)
     } catch (err) {
       alert('Greška pri prodaji!')
       console.error(err)
@@ -228,6 +229,7 @@ export default function InventoryDashboard() {
         prev.map((a) => (a.id === rezArtikal.id ? { ...a, kolicina: a.kolicina - rezKolicina } : a))
       )
       ucitajRezervacije()
+      ucitajArtikle()
       alert(`Rezervisano ${rezKolicina} × ${rezArtikal.naziv} za "${rezKome}"`)
     } catch (err) {
       alert('Greška pri rezervaciji!')
@@ -252,7 +254,7 @@ export default function InventoryDashboard() {
             cena_po_komadu: osnovnaCena,
             ukupna_zarada: zarada,
             prodavac_username: currentUser?.username,
-            uloga_prodavac: 'admin',
+            uloga_prodavac: currentUser?.uloga,
           }),
         ])
         setStanjeKase((prev) => prev + zarada)
@@ -269,6 +271,8 @@ export default function InventoryDashboard() {
       }
       await supabase.from('rezervacije').update({ razduzeno: true }).eq('id', rez.id)
       ucitajRezervacije()
+      ucitajArtikle()
+      ucitajKasu()
     } catch (err) {
       alert('Greška pri razduženju!')
       console.error(err)
@@ -299,6 +303,7 @@ export default function InventoryDashboard() {
       }
       resetForme()
       ucitajArtikle()
+      ucitajKasu()
       setShowForm(false)
     } catch (err) {
       alert('Greška pri čuvanju!')
@@ -346,6 +351,26 @@ export default function InventoryDashboard() {
     await router.push('/login')
   }
 
+  async function izvrsiResetKase() {
+    if (resetCode !== '1234') {
+      alert('Pogrešan kod!')
+      return
+    }
+    setLoading(true)
+    try {
+      await supabase.from('kasa').update({ stanje_zarada: 0 }).eq('id', 1)
+      setStanjeKase(0)
+      alert('Kasa resetovana na 0 €')
+      ucitajKasu()
+    } catch (err) {
+      alert('Greška pri resetu!')
+    } finally {
+      setLoading(false)
+      setShowResetConfirm(false)
+      setResetCode('')
+    }
+  }
+
   const isAdmin = currentUser?.uloga === 'admin'
   const artikliNaIzmaku = artikli.filter((a) => a.kolicina <= 1)
 
@@ -357,13 +382,8 @@ export default function InventoryDashboard() {
   }
 
   const filtrirani = artikli.filter((a) => {
-    if (!isAdmin && a.kategorija && skrivenoZaOstale.includes(a.kategorija)) {
-      return false
-    }
-    return (
-      matchesPretraga(a.naziv, pretraga) &&
-      (!filterKategorija || a.kategorija === filterKategorija)
-    )
+    if (!isAdmin && a.kategorija && skrivenoZaOstale.includes(a.kategorija)) return false
+    return matchesPretraga(a.naziv, pretraga) && (!filterKategorija || a.kategorija === filterKategorija)
   })
 
   const paginated = filtrirani.slice((page - 1) * perPage, page * perPage)
@@ -380,105 +400,144 @@ export default function InventoryDashboard() {
   if (!currentUser) return <div className="p-10 text-center text-xl text-gray-900 dark:text-gray-100">Učitavanje korisnika...</div>
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-24 lg:pb-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto p-4 sm:p-8">
-
-      {/* NAJBOLJI HEADER DO SADA – sve na pravom mestu */}
-<div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-  {/* Gornji deo – gradijent sa naslovom i korisnikom */}
-  <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-8 py-6">
-    <div className="flex items-center justify-between">
-      {/* Levo – logo i naslov */}
-      <div className="flex items-center gap-5">
-        <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 shadow-lg">
-          <CubeIcon className="w-12 h-12 text-white" />
+        {/* HEADER */}
+        <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-8 py-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-5">
+                <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 shadow-lg">
+                  <CubeIcon className="w-12 h-12 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-3xl font-extrabold text-white">Magacin</h1>
+                  <p className="text-white/70 text-sm mt-1">Interni sistem za upravljanje lagerom • v1.0</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-white/80 text-sm">Ulogovan kao</p>
+                  <p className="text-xl font-bold text-white">{currentUser.username}</p>
+                </div>
+                <span className={`px-5 py-2 rounded-full text-white font-bold text-sm shadow-md ${ulogaBoja[currentUser.uloga] || 'bg-gray-600'}`}>
+                  {currentUser.uloga.toUpperCase()}
+                </span>
+                <button
+                  onClick={logout}
+                  className="bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-xl px-5 py-3 flex items-center gap-2 transition shadow-md"
+                >
+                  <ArrowRightOnRectangleIcon className="w-5 h-5" />
+                  <span className="font-medium">Odjavi se</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          {isAdmin && (
+            <div className="px-8 py-5 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex flex-wrap items-center justify-start gap-4">
+                <a href="/admin/prodaje" className="flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/50 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm">
+                  <ChartBarIcon className="w-5 h-5" />
+                  Pregled prodaja
+                </a>
+                <button onClick={() => setShowKriticniModal(true)} className="relative flex items-center gap-2 bg-orange-100 hover:bg-orange-200 dark:bg-orange-900/50 dark:hover:bg-orange-900/70 text-orange-700 dark:text-orange-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm">
+                  <ExclamationTriangleIcon className="w-5 h-5" />
+                  Kritično stanje
+                  {artikliNaIzmaku.length > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold rounded-full h-7 w-7 flex items-center justify-center animate-pulse shadow-lg">
+                      {artikliNaIzmaku.length}
+                    </span>
+                  )}
+                </button>
+                <button onClick={() => setShowRezervisaniModal(true)} className="relative flex items-center gap-2 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/50 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm">
+                  <ClockIcon className="w-5 h-5" />
+                  Rezervisani artikli
+                  {rezervacije.length > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs font-bold rounded-full h-7 w-7 flex items-center justify-center shadow-lg">
+                      {rezervacije.length}
+                    </span>
+                  )}
+                </button>
+                <button onClick={() => setShowVrednostPoKategorijama(true)} className="flex items-center gap-2 bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/50 dark:hover:bg-teal-900/70 text-teal-700 dark:text-teal-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm">
+                  <ChartBarIcon className="w-5 h-5" />
+                  Vrednost po kategorijama
+                </button>
+                <button
+                  onClick={otvoriZaDodavanje}
+                  className="ml-auto flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-7 py-3.5 rounded-xl font-bold text-lg transition shadow-xl transform hover:scale-105"
+                >
+                  <PlusIcon className="w-6 h-6" />
+                  Dodaj novi artikal
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-        <div>
-          <h1 className="text-3xl font-extrabold text-white">Magacin</h1>
-          <p className="text-white/70 text-sm mt-1">Interni sistem za upravljanje lagerom • v1.0</p>
-        </div>
-      </div>
 
-      {/* Desno – korisnik + uloga + logout */}
-      <div className="flex items-center gap-4">
-        <div className="text-right">
-          <p className="text-white/80 text-sm">Ulogovan kao</p>
-          <p className="text-xl font-bold text-white">{currentUser.username}</p>
+        {/* INFO BAR ISPOD HEADERA – stanje lagera, kase i reset */}
+       {isAdmin && (
+  <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-6">
+        {/* Vrednost lagera */}
+        <div className="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+          <div className="bg-indigo-600 dark:bg-indigo-500 rounded-xl p-3">
+            <CubeIcon className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              Vrednost lagera
+            </p>
+            <p className="text-3xl font-extrabold text-indigo-700 dark:text-indigo-400">
+              {novacULageru.toFixed(2)} €
+            </p>
+          </div>
         </div>
-        <span className={`px-5 py-2 rounded-full text-white font-bold text-sm shadow-md ${ulogaBoja[currentUser.uloga] || 'bg-gray-600'}`}>
-          {currentUser.uloga.toUpperCase()}
-        </span>
 
-        {/* Logout dugme – pored korisnika */}
-        <button
-          onClick={logout}
-          className="bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-xl px-5 py-3 flex items-center gap-2 transition shadow-md"
-        >
-          <ArrowRightOnRectangleIcon className="w-5 h-5" />
-          <span className="font-medium">Odjavi se</span>
-        </button>
+        {/* Stanje kase */}
+        <div className="flex items-center gap-4 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+          <div className="bg-green-600 dark:bg-green-500 rounded-xl p-3">
+            <CurrencyEuroIcon className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              Stanje kase
+            </p>
+            <p className="text-3xl font-extrabold text-green-700 dark:text-green-400">
+              {stanjeKase.toFixed(2)} €
+            </p>
+          </div>
+        </div>
+
+        {/* Ukupno artikala */}
+        <div className="flex items-center gap-4 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+          <div className="bg-purple-600 dark:bg-purple-500 rounded-xl p-3">
+            <ShoppingBagIcon className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              Ukupno artikala
+            </p>
+            <p className="text-3xl font-extrabold text-purple-700 dark:text-purple-400">
+              {artikli.length}
+            </p>
+          </div>
+        </div>
+
+        {/* Reset dugme */}
+        <div className="flex items-center">
+          <button
+            onClick={() => setShowResetConfirm(true)}
+            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl transition transform hover:scale-105 active:scale-95 flex items-center gap-3"
+          >
+            <TrashIcon className="w-6 h-6" />
+            Resetuj kasu
+          </button>
+        </div>
       </div>
     </div>
   </div>
-
-  {/* Donji deo – samo admin akcije */}
-  {isAdmin && (
-    <div className="px-8 py-5 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
-      <div className="flex flex-wrap items-center justify-start gap-4">
-        <a
-          href="/admin/prodaje"
-          className="flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/50 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm"
-        >
-          <ChartBarIcon className="w-5 h-5" />
-          Pregled prodaja
-        </a>
-
-        <button
-          onClick={() => setShowKriticniModal(true)}
-          className="relative flex items-center gap-2 bg-orange-100 hover:bg-orange-200 dark:bg-orange-900/50 dark:hover:bg-orange-900/70 text-orange-700 dark:text-orange-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm"
-        >
-          <ExclamationTriangleIcon className="w-5 h-5" />
-          Kritično stanje
-          {artikliNaIzmaku.length > 0 && (
-            <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold rounded-full h-7 w-7 flex items-center justify-center animate-pulse shadow-lg">
-              {artikliNaIzmaku.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setShowRezervisaniModal(true)}
-          className="relative flex items-center gap-2 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/50 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm"
-        >
-          <ClockIcon className="w-5 h-5" />
-          Rezervisani artikli
-          {rezervacije.length > 0 && (
-            <span className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs font-bold rounded-full h-7 w-7 flex items-center justify-center shadow-lg">
-              {rezervacije.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setShowVrednostPoKategorijama(true)}
-          className="flex items-center gap-2 bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/50 dark:hover:bg-teal-900/70 text-teal-700 dark:text-teal-300 px-5 py-3 rounded-xl font-semibold transition shadow-sm"
-        >
-          <ChartBarIcon className="w-5 h-5" />
-          Vrednost po kategorijama
-        </button>
-
-        {/* NAJISTAKNUTIJE DUGME – Dodaj novi artikal */}
-        <button
-          onClick={otvoriZaDodavanje}
-          className="ml-auto flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-7 py-3.5 rounded-xl font-bold text-lg transition shadow-xl transform hover:scale-105"
-        >
-          <PlusIcon className="w-6 h-6" />
-          Dodaj novi artikal
-        </button>
-      </div>
-    </div>
-  )}
-</div>
+)}
         {/* Pretraga + Filter */}
         <div className="flex flex-col sm:flex-row gap-4 mb-8">
           <div className="relative flex-1">
@@ -509,197 +568,13 @@ export default function InventoryDashboard() {
           </select>
         </div>
 
-        {/* Forma za dodavanje/izmenu – samo za admina */}
-{/* PREMIUM MODAL – responsivan, sa fiksnim dugmadima na mobilnom */}
-{showForm && (
-  <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-    <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full my-4 flex flex-col max-h-[95vh]">
-      {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-500 text-white px-6 py-5 rounded-t-3xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-white/20 rounded-xl p-3">
-              <CubeIcon className="w-8 h-8" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">
-                {editId ? 'Izmeni artikal' : 'Novi artikal'}
-              </h2>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              setShowForm(false)
-              setEditId(null)
-              resetForme()
-            }}
-            className="bg-white/20 hover:bg-white/30 rounded-xl p-2 transition"
-          >
-            <XMarkIcon className="w-6 h-6" />
-          </button>
-        </div>
-      </div>
-
-      {/* Forma – scrollable deo */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Naziv */}
-        <div>
-          <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-            Naziv artikla
-          </label>
-          <input
-            required
-            value={naziv}
-            onChange={(e) => setNaziv(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-purple-400 text-base"
-            placeholder="npr. iPhone 14 LCD Original"
-            autoFocus
-          />
-        </div>
-
-        {/* Količina i kategorija */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-              Količina
-            </label>
-            <input
-              type="number"
-              required
-              value={kolicina}
-              onChange={(e) => setKolicina(e.target.value)}
-              className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-indigo-400"
-            />
-          </div>
-          <div>
-            <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-              Kategorija
-            </label>
-            <select
-              value={kategorija}
-              onChange={(e) => setKategorija(e.target.value)}
-              className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-indigo-400"
-            >
-              <option value="">Izaberi...</option>
-              {kategorije.map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Cene */}
-        <div className="space-y-5">
-          <h3 className="text-base font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-            <CurrencyEuroIcon className="w-5 h-5 text-green-600" />
-            Cene artikla
-          </h3>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl p-4 text-center">
-              <p className="text-xs text-gray-600 dark:text-gray-400">Nabavna</p>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={osnovna}
-                onChange={(e) => setOsnovna(e.target.value)}
-                className="mt-1 w-full text-xl font-bold text-indigo-700 dark:text-indigo-400 bg-transparent text-center outline-none"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/30 dark:to-orange-800/30 rounded-2xl p-4 text-center">
-              <p className="text-xs text-gray-600 dark:text-gray-400">Serviser</p>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={serviser}
-                onChange={(e) => setServiser(e.target.value)}
-                className="mt-1 w-full text-xl font-bold text-orange-700 dark:text-orange-400 bg-transparent text-center outline-none"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl p-4 text-center">
-              <p className="text-xs text-gray-600 dark:text-gray-400">Kolega</p>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={kolega}
-                onChange={(e) => setKolega(e.target.value)}
-                className="mt-1 w-full text-xl font-bold text-green-700 dark:text-green-400 bg-transparent text-center outline-none"
-                placeholder="0.00"
-              />
-            </div>
-          </div>
-
-          {/* Ulazna cena */}
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
-              Ulazna cena (opcionalno)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={ulazna}
-              onChange={(e) => setUlazna(e.target.value)}
-              className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-yellow-400"
-              placeholder="0.00 €"
-            />
-          </div>
-
-          {/* Diskretna marža */}
-          {ulazna && osnovna && Number(ulazna) > 0 && Number(osnovna) > 0 && (
-            <div className="flex justify-center">
-              <div className="bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-400 dark:border-yellow-600 rounded-xl px-5 py-2.5 text-sm font-medium shadow-sm">
-                Marža: <span className="font-bold text-yellow-700 dark:text-yellow-400">
-                  {(Number(osnovna) - Number(ulazna)).toFixed(2)} €
-                </span>
-                {' '}({((Number(osnovna) / Number(ulazna) - 1) * 100).toFixed(1)}%)
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* FIKSNA DUGMAD NA DNU – uvek vidljiva na mobilnom */}
-      <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-6 py-4 rounded-b-3xl">
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => {
-              setShowForm(false)
-              setEditId(null)
-              resetForme()
-            }}
-            className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-xl font-medium transition"
-          >
-            Otkaži
-          </button>
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex-1 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-70 text-white rounded-xl font-bold transition shadow-md"
-          >
-            {loading ? 'Čuvam...' : editId ? 'Sačuvaj' : 'Dodaj artikal'}
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
-
         {/* Lager lista */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-24 lg:mb-0">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
           <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-4">
             <h2 className="text-2xl font-bold flex items-center gap-3">
               <ShoppingBagIcon className="w-8 h-8" /> Lager ({filtrirani.length} artikala)
             </h2>
           </div>
-
           {/* Desktop tabela */}
           <div className="hidden lg:block overflow-x-auto">
             <table className="w-full">
@@ -719,11 +594,7 @@ export default function InventoryDashboard() {
                   const jeUpozorenje = art.kolicina <= 3 && art.kolicina > 1
                   const Ikonica = dohvatiIkonu(art.kategorija)
                   return (
-                    <tr key={art.id} className={`border-t transition ${
-                      jeKriticno ? 'bg-red-50 dark:bg-red-900/30' :
-                      jeUpozorenje ? 'bg-orange-50 dark:bg-orange-900/30' :
-                      'hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}>
+                    <tr key={art.id} className={`border-t transition ${jeKriticno ? 'bg-red-50 dark:bg-red-900/30' : jeUpozorenje ? 'bg-orange-50 dark:bg-orange-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
                       <td className="p-4 flex items-center gap-4">
                         <Ikonica className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
                         <span className="font-medium text-lg">{art.naziv}</span>
@@ -731,9 +602,7 @@ export default function InventoryDashboard() {
                       <td className="p-4 text-right text-xl font-medium">{art.osnovna_cena.toFixed(2)} €</td>
                       <td className="p-4 text-right text-xl font-medium text-orange-600 dark:text-orange-400">{art.cena_serviser.toFixed(2)} €</td>
                       <td className="p-4 text-right text-xl font-medium text-green-600 dark:text-green-400">{art.cena_kolega.toFixed(2)} €</td>
-                      <td className={`p-4 text-right font-bold text-xl ${
-                        jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : ''
-                      }`}>
+                      <td className={`p-4 text-right font-bold text-xl ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : ''}`}>
                         {art.kolicina}
                       </td>
                       {isAdmin && (
@@ -750,7 +619,6 @@ export default function InventoryDashboard() {
               </tbody>
             </table>
           </div>
-
           {/* Mobilni prikaz */}
           <div className="block lg:hidden space-y-4 p-4">
             {paginated.map((art) => {
@@ -792,7 +660,6 @@ export default function InventoryDashboard() {
               )
             })}
           </div>
-
           {/* Paginacija */}
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 dark:bg-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -817,119 +684,265 @@ export default function InventoryDashboard() {
           )}
         </div>
 
-        {/* === SVI MODALI === */}
-
-        {/* Modal za prodaju */}
-       {/* Modal za prodaju – kompaktan i pregledan */}
-{showProdaja && prodajaArtikal && (
-  <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-5">
-        <h3 className="text-xl font-bold flex items-center gap-2 text-gray-900 dark:text-gray-100">
-          <ShoppingBagIcon className="w-7 h-7 text-green-600" />
-          Prodaja
-        </h3>
-        <button onClick={() => setShowProdaja(false)} className="text-gray-500 hover:text-gray-700">
-          <XMarkIcon className="w-7 h-7" />
-        </button>
-      </div>
-
-      {/* Naziv artikla */}
-      <p className="text-lg font-semibold text-center mb-5 text-gray-900 dark:text-gray-100">
-        {prodajaArtikal.naziv}
-      </p>
-
-      {/* Cene u jednom redu – kompaktne kartice */}
-      <div className="grid grid-cols-3 gap-3 mb-6 text-center">
-        {/* Ulazna cena */}
-        <div className="bg-gray-100 dark:bg-gray-700 rounded-lg py-3 px-2">
-          <p className="text-xs text-gray-600 dark:text-gray-400">Ulazna</p>
-          <p className="text-lg font-bold text-gray-800 dark:text-gray-200">
-            {prodajaArtikal.ulazna_cena > 0 ? prodajaArtikal.ulazna_cena.toFixed(2) : '—'} €
-          </p>
-        </div>
-
-        {/* Nabavna cena */}
-        <div className="bg-indigo-100 dark:bg-indigo-900/40 rounded-lg py-3 px-2">
-          <p className="text-xs text-gray-600 dark:text-gray-400">Nabavna</p>
-          <p className="text-lg font-bold text-indigo-700 dark:text-indigo-400">
-            {prodajaArtikal.osnovna_cena.toFixed(2)} €
-          </p>
-        </div>
-
-        {/* Marža – samo ako postoji ulazna cena */}
-        {prodajaArtikal.ulazna_cena > 0 && (
-          <div className="bg-yellow-100 dark:bg-yellow-900/50 rounded-lg py-3 px-2 border border-yellow-500 dark:border-yellow-600">
-            <p className="text-xs text-gray-700 dark:text-gray-300">Marža</p>
-            <p className="text-lg font-bold text-yellow-700 dark:text-yellow-400">
-              {(prodajaArtikal.osnovna_cena - prodajaArtikal.ulazna_cena).toFixed(2)} €
-            </p>
+        {/* MODAL ZA DODAVANJE / IZMENU */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full my-4 flex flex-col max-h-[95vh]">
+              <div className="bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-500 text-white px-6 py-5 rounded-t-3xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white/20 rounded-xl p-3">
+                      <CubeIcon className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold">
+                        {editId ? 'Izmeni artikal' : 'Novi artikal'}
+                      </h2>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowForm(false)
+                      setEditId(null)
+                      resetForme()
+                    }}
+                    className="bg-white/20 hover:bg-white/30 rounded-xl p-2 transition"
+                  >
+                    <XMarkIcon className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+              <form onSubmit={sacuvajArtikal} className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Naziv artikla
+                  </label>
+                  <input
+                    required
+                    value={naziv}
+                    onChange={(e) => setNaziv(e.target.value)}
+                    className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-purple-400 text-base"
+                    placeholder="npr. iPhone 14 LCD Original"
+                    autoFocus
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                      Količina
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={kolicina}
+                      onChange={(e) => setKolicina(e.target.value)}
+                      className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                      Kategorija
+                    </label>
+                    <select
+                      value={kategorija}
+                      onChange={(e) => setKategorija(e.target.value)}
+                      className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-indigo-400"
+                    >
+                      <option value="">Izaberi...</option>
+                      {kategorije.map((k) => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-5">
+                  <h3 className="text-base font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                    <CurrencyEuroIcon className="w-5 h-5 text-green-600" />
+                    Cene artikla
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl p-4 text-center">
+                      <p className="text-xs text-gray-600 dark:text-gray-400">Nabavna</p>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={osnovna}
+                        onChange={(e) => setOsnovna(e.target.value)}
+                        className="mt-1 w-full text-xl font-bold text-indigo-700 dark:text-indigo-400 bg-transparent text-center outline-none"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/30 dark:to-orange-800/30 rounded-2xl p-4 text-center">
+                      <p className="text-xs text-gray-600 dark:text-gray-400">Serviser</p>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={serviser}
+                        onChange={(e) => setServiser(e.target.value)}
+                        className="mt-1 w-full text-xl font-bold text-orange-700 dark:text-orange-400 bg-transparent text-center outline-none"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl p-4 text-center">
+                      <p className="text-xs text-gray-600 dark:text-gray-400">Kolega</p>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={kolega}
+                        onChange={(e) => setKolega(e.target.value)}
+                        className="mt-1 w-full text-xl font-bold text-green-700 dark:text-green-400 bg-transparent text-center outline-none"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Ulazna cena (opcionalno)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={ulazna}
+                      onChange={(e) => setUlazna(e.target.value)}
+                      className="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-yellow-400"
+                      placeholder="0.00 €"
+                    />
+                  </div>
+                  {ulazna && osnovna && Number(ulazna) > 0 && Number(osnovna) > 0 && (
+                    <div className="flex justify-center">
+                      <div className="bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-400 dark:border-yellow-600 rounded-xl px-5 py-2.5 text-sm font-medium shadow-sm">
+                        Marža: <span className="font-bold text-yellow-700 dark:text-yellow-400">
+                          {(Number(osnovna) - Number(ulazna)).toFixed(2)} €
+                        </span>
+                        {' '}({((Number(osnovna) / Number(ulazna) - 1) * 100).toFixed(1)}%)
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </form>
+              <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-6 py-4 rounded-b-3xl">
+                <div className="flex gap-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false)
+                      setEditId(null)
+                      resetForme()
+                    }}
+                    className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-xl font-medium transition"
+                  >
+                    Otkaži
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-70 text-white rounded-xl font-bold transition shadow-md"
+                  >
+                    {loading ? 'Čuvam...' : editId ? 'Sačuvaj' : 'Dodaj artikal'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
-      </div>
 
-      {/* Forma */}
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Količina (lager: {prodajaArtikal.kolicina})
-          </label>
-          <input
-            type="number"
-            min="1"
-            max={prodajaArtikal.kolicina}
-            value={prodajaKolicina}
-            onChange={(e) => setProdajaKolicina(Number(e.target.value))}
-            className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-400"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Cena po komadu (€)
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            value={prodajaCena}
-            onChange={(e) => setProdajaCena(Number(e.target.value))}
-            placeholder={prodajaArtikal.osnovna_cena.toFixed(2)}
-            className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-400"
-          />
-        </div>
-
-        {/* Očekivana zarada */}
-        {prodajaKolicina > 0 && prodajaCena > 0 && (
-          <div className="bg-green-50 dark:bg-green-900/30 rounded-lg p-3 text-center">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Zarada</p>
-            <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-              {(prodajaCena * prodajaKolicina).toFixed(2)} €
-            </p>
+        {/* MODAL ZA PRODAJU */}
+        {showProdaja && prodajaArtikal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6">
+              <div className="flex justify-between items-center mb-5">
+                <h3 className="text-xl font-bold flex items-center gap-2 text-gray-900 dark:text-gray-100">
+                  <ShoppingBagIcon className="w-7 h-7 text-green-600" />
+                  Prodaja
+                </h3>
+                <button onClick={() => setShowProdaja(false)} className="text-gray-500 hover:text-gray-700">
+                  <XMarkIcon className="w-7 h-7" />
+                </button>
+              </div>
+              <p className="text-lg font-semibold text-center mb-5 text-gray-900 dark:text-gray-100">
+                {prodajaArtikal.naziv}
+              </p>
+              <div className="grid grid-cols-3 gap-3 mb-6 text-center">
+                <div className="bg-gray-100 dark:bg-gray-700 rounded-lg py-3 px-2">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Ulazna</p>
+                  <p className="text-lg font-bold text-gray-800 dark:text-gray-200">
+                    {prodajaArtikal.ulazna_cena > 0 ? prodajaArtikal.ulazna_cena.toFixed(2) : '—'} €
+                  </p>
+                </div>
+                <div className="bg-indigo-100 dark:bg-indigo-900/40 rounded-lg py-3 px-2">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Nabavna</p>
+                  <p className="text-lg font-bold text-indigo-700 dark:text-indigo-400">
+                    {prodajaArtikal.osnovna_cena.toFixed(2)} €
+                  </p>
+                </div>
+                {prodajaArtikal.ulazna_cena > 0 && (
+                  <div className="bg-yellow-100 dark:bg-yellow-900/50 rounded-lg py-3 px-2 border border-yellow-500 dark:border-yellow-600">
+                    <p className="text-xs text-gray-700 dark:text-gray-300">Marža</p>
+                    <p className="text-lg font-bold text-yellow-700 dark:text-yellow-400">
+                      {(prodajaArtikal.osnovna_cena - prodajaArtikal.ulazna_cena).toFixed(2)} €
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+                    Količina (lager: {prodajaArtikal.kolicina})
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={prodajaArtikal.kolicina}
+                    value={prodajaKolicina}
+                    onChange={(e) => setProdajaKolicina(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+                    Cena po komadu (€)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={prodajaCena}
+                    onChange={(e) => setProdajaCena(Number(e.target.value))}
+                    placeholder={prodajaArtikal.osnovna_cena.toFixed(2)}
+                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-400"
+                  />
+                </div>
+                {prodajaKolicina > 0 && prodajaCena > 0 && (
+                  <div className="bg-green-50 dark:bg-green-900/30 rounded-lg p-3 text-center">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Zarada</p>
+                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      {(prodajaCena * prodajaKolicina).toFixed(2)} €
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowProdaja(false)}
+                  className="flex-1 py-2.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-lg font-medium transition"
+                >
+                  Otkaži
+                </button>
+                <button
+                  onClick={izvrsiProdaju}
+                  disabled={loading || prodajaKolicina < 1 || prodajaKolicina > prodajaArtikal.kolicina}
+                  className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg font-medium transition"
+                >
+                  {loading ? 'Prodajem...' : 'Prodaj'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
-      </div>
 
-      {/* Dugmad */}
-      <div className="flex gap-3 mt-6">
-        <button
-          onClick={() => setShowProdaja(false)}
-          className="flex-1 py-2.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-lg font-medium transition"
-        >
-          Otkaži
-        </button>
-        <button
-          onClick={izvrsiProdaju}
-          disabled={loading || prodajaKolicina < 1 || prodajaKolicina > prodajaArtikal.kolicina}
-          className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg font-medium transition"
-        >
-          {loading ? 'Prodajem...' : 'Prodaj'}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-        {/* Modal za rezervaciju */}
+        {/* MODAL ZA REZERVACIJU */}
         {showRezervacija && rezArtikal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-8">
@@ -966,7 +979,7 @@ export default function InventoryDashboard() {
           </div>
         )}
 
-        {/* Modal za kritično stanje */}
+        {/* MODAL ZA KRITIČNO STANJE */}
         {showKriticniModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -1009,7 +1022,7 @@ export default function InventoryDashboard() {
           </div>
         )}
 
-        {/* Modal za rezervisane artikle */}
+        {/* MODAL ZA REZERVISANE ARTIKLE */}
         {showRezervisaniModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -1053,7 +1066,7 @@ export default function InventoryDashboard() {
           </div>
         )}
 
-        {/* Modal za vrednost po kategorijama */}
+        {/* MODAL ZA VREDNOST PO KATEGORIJAMA */}
         {showVrednostPoKategorijama && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
@@ -1085,43 +1098,36 @@ export default function InventoryDashboard() {
           </div>
         )}
 
-        {/* Reset kase */}
+        {/* MODAL ZA RESET KASE */}
         {showResetConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-8">
-              <h3 className="text-2xl font-bold text-red-600 mb-6">Reset kase na 0 €?</h3>
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-8">
+              <h3 className="text-2xl font-bold text-red-600 mb-6 text-center">Reset kase na 0 €?</h3>
               <input
                 type="password"
-                placeholder="Unesi kod"
+                placeholder="Unesi kod (1234)"
                 value={resetCode}
-                onChange={e => setResetCode(e.target.value)}
-                className="w-full px-4 py-3 border rounded-lg mb-6"
+                onChange={(e) => setResetCode(e.target.value)}
+                className="w-full px-5 py-4 border border-gray-300 dark:border-gray-600 rounded-xl text-lg mb-6 focus:ring-4 focus:ring-red-400"
+                autoFocus
               />
               <div className="flex gap-4">
-                <button onClick={() => setShowResetConfirm(false)} className="flex-1 py-3 bg-gray-300 hover:bg-gray-400 rounded-lg">Otkaži</button>
-                <button onClick={izvrsiResetKase} disabled={loading} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg">
+                <button
+                  onClick={() => {
+                    setShowResetConfirm(false)
+                    setResetCode('')
+                  }}
+                  className="flex-1 py-4 bg-gray-300 hover:bg-gray-400 rounded-xl font-bold transition"
+                >
+                  Otkaži
+                </button>
+                <button
+                  onClick={izvrsiResetKase}
+                  disabled={loading}
+                  className="flex-1 py-4 bg-red-600 hover:bg-red-700 disabled:opacity-70 text-white rounded-xl font-bold transition"
+                >
                   {loading ? 'Resetujem...' : 'Resetuj kasu'}
                 </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom bar za admina (mobilni) */}
-        {isAdmin && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t-4 border-indigo-600 shadow-2xl lg:hidden z-10">
-            <div className="flex justify-around items-center py-5 px-6">
-              <div className="text-center">
-                <p className="text-xs text-gray-600">Vrednost lagera</p>
-                <p className="text-2xl font-bold text-indigo-600">{novacULageru.toFixed(2)} €</p>
-              </div>
-              <div className="text-center border-x-2 border-gray-300 px-8">
-                <p className="text-xs text-gray-600">Stanje kase</p>
-                <p className="text-2xl font-bold text-green-600">{stanjeKase.toFixed(2)} €</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-gray-600">Artikala</p>
-                <p className="text-2xl font-bold">{artikli.length}</p>
               </div>
             </div>
           </div>
@@ -1129,23 +1135,4 @@ export default function InventoryDashboard() {
       </div>
     </div>
   )
-}
-
-// Dodaj funkciju za reset kase (ako je nemaš već definisanu)
-async function izvrsiResetKase() {
-  if (resetCode !== '1234') {
-    alert('Pogrešan kod!')
-    return
-  }
-  setLoading(true)
-  try {
-    await supabase.from('kasa').update({ stanje_zarada: 0 }).eq('id', 1)
-    setStanjeKase(0)
-    alert('Kasa resetovana na 0 €')
-  } catch (err) {
-    alert('Greška pri resetu!')
-  } finally {
-    setLoading(false)
-    setShowResetConfirm(false)
-  }
 }
