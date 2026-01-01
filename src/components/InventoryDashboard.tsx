@@ -474,70 +474,67 @@ export default function InventoryDashboard() {
           )}
         </div>
 
-        {/* INFO BAR ISPOD HEADERA – stanje lagera, kase i reset */}
-       {isAdmin && (
-  <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-    <div className="p-6">
-      <div className="flex flex-wrap items-center justify-between gap-6">
-        {/* Vrednost lagera */}
-        <div className="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
-          <div className="bg-indigo-600 dark:bg-indigo-500 rounded-xl p-3">
-            <CubeIcon className="w-8 h-8 text-white" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
-              Vrednost lagera
-            </p>
-            <p className="text-3xl font-extrabold text-indigo-700 dark:text-indigo-400">
-              {novacULageru.toFixed(2)} €
-            </p>
-          </div>
-        </div>
+        {/* INFO BAR ISPOD HEADERA */}
+        {isAdmin && (
+          <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="p-6">
+              <div className="flex flex-wrap items-center justify-between gap-6">
+                <div className="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+                  <div className="bg-indigo-600 dark:bg-indigo-500 rounded-xl p-3">
+                    <CubeIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                      Vrednost lagera
+                    </p>
+                    <p className="text-3xl font-extrabold text-indigo-700 dark:text-indigo-400">
+                      {novacULageru.toFixed(2)} €
+                    </p>
+                  </div>
+                </div>
 
-        {/* Stanje kase */}
-        <div className="flex items-center gap-4 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
-          <div className="bg-green-600 dark:bg-green-500 rounded-xl p-3">
-            <CurrencyEuroIcon className="w-8 h-8 text-white" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
-              Stanje kase
-            </p>
-            <p className="text-3xl font-extrabold text-green-700 dark:text-green-400">
-              {stanjeKase.toFixed(2)} €
-            </p>
-          </div>
-        </div>
+                <div className="flex items-center gap-4 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+                  <div className="bg-green-600 dark:bg-green-500 rounded-xl p-3">
+                    <CurrencyEuroIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                      Stanje kase
+                    </p>
+                    <p className="text-3xl font-extrabold text-green-700 dark:text-green-400">
+                      {stanjeKase.toFixed(2)} €
+                    </p>
+                  </div>
+                </div>
 
-        {/* Ukupno artikala */}
-        <div className="flex items-center gap-4 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
-          <div className="bg-purple-600 dark:bg-purple-500 rounded-xl p-3">
-            <ShoppingBagIcon className="w-8 h-8 text-white" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
-              Ukupno artikala
-            </p>
-            <p className="text-3xl font-extrabold text-purple-700 dark:text-purple-400">
-              {artikli.length}
-            </p>
-          </div>
-        </div>
+                <div className="flex items-center gap-4 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+                  <div className="bg-purple-600 dark:bg-purple-500 rounded-xl p-3">
+                    <ShoppingBagIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                      Ukupno artikala
+                    </p>
+                    <p className="text-3xl font-extrabold text-purple-700 dark:text-purple-400">
+                      {artikli.length}
+                    </p>
+                  </div>
+                </div>
 
-        {/* Reset dugme */}
-        <div className="flex items-center">
-          <button
-            onClick={() => setShowResetConfirm(true)}
-            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl transition transform hover:scale-105 active:scale-95 flex items-center gap-3"
-          >
-            <TrashIcon className="w-6 h-6" />
-            Resetuj kasu
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+                <div className="flex items-center">
+                  <button
+                    onClick={() => setShowResetConfirm(true)}
+                    className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl transition transform hover:scale-105 active:scale-95 flex items-center gap-3"
+                  >
+                    <TrashIcon className="w-6 h-6" />
+                    Resetuj kasu
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Pretraga + Filter */}
         <div className="flex flex-col sm:flex-row gap-4 mb-8">
           <div className="relative flex-1">
@@ -575,7 +572,8 @@ export default function InventoryDashboard() {
               <ShoppingBagIcon className="w-8 h-8" /> Lager ({filtrirani.length} artikala)
             </h2>
           </div>
-          {/* Desktop tabela */}
+
+          {/* Desktop tabela – sve cene vidljive */}
           <div className="hidden lg:block overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-100 dark:bg-gray-700">
@@ -619,7 +617,8 @@ export default function InventoryDashboard() {
               </tbody>
             </table>
           </div>
-          {/* Mobilni prikaz */}
+
+          {/* Mobilni prikaz – cena prema ulozi */}
           <div className="block lg:hidden space-y-4 p-4">
             {paginated.map((art) => {
               const Ikonica = dohvatiIkonu(art.kategorija)
@@ -627,23 +626,25 @@ export default function InventoryDashboard() {
                               currentUser?.uloga === 'serviser' ? { cena: art.cena_serviser, label: 'Cena serviser' } :
                               currentUser?.uloga === 'lager' ? { cena: art.osnovna_cena, label: 'Nabavna cena' } :
                               { cena: art.osnovna_cena, label: 'Cena' }
+              const jeKriticno = art.kolicina <= 1
+              const jeUpozorenje = art.kolicina <= 3 && art.kolicina > 1
               return (
-                <div key={art.id} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                <div key={art.id} className={`bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border ${jeKriticno ? 'border-red-500' : jeUpozorenje ? 'border-orange-500' : 'border-transparent'}`}>
                   <div className="flex items-center gap-4 mb-3">
-                    <Ikonica className="w-10 h-10 text-indigo-600" />
+                    <Ikonica className={`w-10 h-10 ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : 'text-indigo-600'}`} />
                     <div className="flex-1">
-                      <p className="font-bold text-lg">{art.naziv}</p>
+                      <p className="font-bold text-lg text-gray-900 dark:text-white">{art.naziv}</p>
                       <p className="text-sm text-gray-600 dark:text-gray-400">{art.kategorija || 'Bez kategorije'}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-center">
                     <div>
-                      <p className="text-sm text-gray-600">Cena</p>
-                      <p className="text-xl font-bold text-indigo-600">{cenaInfo.cena.toFixed(2)} €</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">{cenaInfo.label}</p>
+                      <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">{cenaInfo.cena.toFixed(2)} €</p>
                     </div>
                     <div>
-                      <p className="text-sm text-gray-600">Količina</p>
-                      <p className={`text-xl font-bold ${art.kolicina <= 1 ? 'text-red-600' : art.kolicina <= 3 ? 'text-orange-600' : 'text-gray-900'}`}>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Količina</p>
+                      <p className={`text-xl font-bold ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>
                         {art.kolicina}
                       </p>
                     </div>
@@ -660,6 +661,7 @@ export default function InventoryDashboard() {
               )
             })}
           </div>
+
           {/* Paginacija */}
           {totalPages > 1 && (
             <div className="p-6 border-t bg-gray-50 dark:bg-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
