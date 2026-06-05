@@ -2,6 +2,7 @@
 import { supabase } from '@/lib/supabase'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import toast, { Toaster } from 'react-hot-toast'
 import {
   PlusIcon,
@@ -18,11 +19,53 @@ import {
   ExclamationTriangleIcon,
   DevicePhoneMobileIcon,
   Battery100Icon,
+  UserIcon,
+  UserGroupIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline'
 
 type Uloga = 'admin' | 'kolega' | 'serviser' | 'lager'
+type Profile = { username: string; uloga: Uloga; active?: boolean }
 
-export default function InventoryDashboard() {
+type OsobaDugovanje = {
+  kome: string
+  stavke: any[]
+  ukupno: number
+  dana: number
+}
+
+function prikaziNapomenu(napomena: string | null): string {
+  if (!napomena) return ''
+  if (napomena.startsWith('[dug]')) return napomena.slice(5).trim()
+  if (napomena.startsWith('[rez]')) return napomena.slice(5).trim()
+  return napomena
+}
+
+function danaOd(datum: string): number {
+  return Math.floor((Date.now() - new Date(datum).getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function bojaStarosti(dana: number): string {
+  if (dana >= 7) return 'text-red-600 dark:text-red-400'
+  if (dana >= 3) return 'text-orange-600 dark:text-orange-400'
+  return 'text-green-600 dark:text-green-400'
+}
+
+function badgeStarosti(dana: number): string {
+  if (dana >= 7) return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+  if (dana >= 3) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
+  return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+}
+
+const ulogaNaziv: Record<Uloga, string> = {
+  admin: 'Admin',
+  kolega: 'Kolega',
+  serviser: 'Serviser',
+  lager: 'Lager',
+}
+
+export default function InventoryDashboard({ initialEditId }: { initialEditId?: string | null }) {
   const router = useRouter()
   const [currentUser, setCurrentUser] = useState<{ username: string; uloga: Uloga } | null>(null)
   const [artikli, setArtikli] = useState<any[]>([])
@@ -60,6 +103,14 @@ export default function InventoryDashboard() {
   const [rezKome, setRezKome] = useState('')
   const [rezNapomena, setRezNapomena] = useState('')
 
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [dugovanjaTab, setDugovanjaTab] = useState<'osobe' | 'sve'>('osobe')
+  const [otvorenaOsoba, setOtvorenaOsoba] = useState<string | null>(null)
+  const [izabraneStavke, setIzabraneStavke] = useState<Set<string>>(new Set())
+  const [showPreimenujModal, setShowPreimenujModal] = useState(false)
+  const [preimenujStaroIme, setPreimenujStaroIme] = useState('')
+  const [preimenujNovoIme, setPreimenujNovoIme] = useState('')
+
   // Reset kase
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetCode, setResetCode] = useState('')
@@ -68,6 +119,7 @@ export default function InventoryDashboard() {
   const [showKriticniModal, setShowKriticniModal] = useState(false)
   const [showRezervisaniModal, setShowRezervisaniModal] = useState(false)
   const [showVrednostPoKategorijama, setShowVrednostPoKategorijama] = useState(false)
+  const [showInfoBar, setShowInfoBar] = useState(false)
 
   // Paginacija
   const [page, setPage] = useState(1)
@@ -84,7 +136,7 @@ export default function InventoryDashboard() {
     'Ostalo',
   ]
 
-  const skrivenoZaOstale = ['BATERIJE IPHONE', 'IPHONE BATERIJE – VERIFY']
+  const skrivenoZaOstale = ['BATERIJE IPHONE', 'BATERIJE VERIFY']
 
   const ulogaBoja: Record<Uloga, string> = {
     admin: 'bg-indigo-600',
@@ -105,12 +157,18 @@ export default function InventoryDashboard() {
       }
       const { data: profile, error: profileErr } = await supabase
         .from('profiles')
-        .select('username, uloga')
+        .select('username, uloga, active')
         .eq('id', user.id)
         .single()
       if (profileErr || !profile) {
         console.error('Error fetching profile:', profileErr)
         await supabase.auth.signOut()
+        await router.push('/login')
+        return
+      }
+      if (profile.active === false) {
+        await supabase.auth.signOut()
+        toast.error('Nalog je deaktiviran.')
         await router.push('/login')
         return
       }
@@ -164,11 +222,28 @@ export default function InventoryDashboard() {
     }
   }
 
+  async function ucitajProfile() {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('username, uloga, active')
+        .order('username', { ascending: true })
+      if (error) {
+        console.error('Error fetching profiles:', error)
+        toast.error('Greška pri učitavanju liste korisnika.')
+        return
+      }
+      setProfiles((data || []) as Profile[])
+    } catch (err) {
+      console.error('Unexpected error loading profiles:', err)
+    }
+  }
+
   async function ucitajRezervacije() {
     try {
       const { data, error } = await supabase
         .from('rezervacije')
-        .select('*, artikli(naziv, osnovna_cena)')
+        .select('*, artikli(naziv, osnovna_cena, cena_kolega, cena_serviser)')
         .eq('razduzeno', false)
         .order('datum_rezervacije', { ascending: false })
       if (error) {
@@ -195,6 +270,7 @@ export default function InventoryDashboard() {
     ucitajKasu().catch(err => toast.error('Greška pri učitavanju kase'))
     if (currentUser.uloga === 'admin') {
       ucitajRezervacije().catch(err => toast.error('Greška pri učitavanju rezervacija'))
+      ucitajProfile()
     }
   }, [currentUser])
 
@@ -218,6 +294,72 @@ export default function InventoryDashboard() {
     }, 300)
     return () => clearTimeout(id)
   }, [pretraga])
+
+  useEffect(() => {
+    if (!initialEditId || !currentUser || currentUser.uloga !== 'admin' || artikli.length === 0) return
+    const art = artikli.find(a => a.id === initialEditId)
+    if (art) {
+      izmeniArtikal(art)
+      window.history.replaceState({}, '', '/')
+    }
+  }, [initialEditId, artikli, currentUser])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (showPreimenujModal) {
+        setShowPreimenujModal(false)
+        return
+      }
+      if (showResetConfirm) {
+        setShowResetConfirm(false)
+        setResetCode('')
+        return
+      }
+      if (showVrednostPoKategorijama) {
+        setShowVrednostPoKategorijama(false)
+        return
+      }
+      if (showRezervisaniModal) {
+        if (otvorenaOsoba) {
+          setOtvorenaOsoba(null)
+          setIzabraneStavke(new Set())
+        } else {
+          setShowRezervisaniModal(false)
+        }
+        return
+      }
+      if (showKriticniModal) {
+        setShowKriticniModal(false)
+        return
+      }
+      if (showForm) {
+        setShowForm(false)
+        setEditId(null)
+        resetForme()
+        return
+      }
+      if (showProdaja) {
+        setShowProdaja(false)
+        return
+      }
+      if (showRezervacija) {
+        setShowRezervacija(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    showPreimenujModal,
+    showResetConfirm,
+    showVrednostPoKategorijama,
+    showRezervisaniModal,
+    otvorenaOsoba,
+    showKriticniModal,
+    showForm,
+    showProdaja,
+    showRezervacija,
+  ])
 
   // ---------- Actions ----------
   function otvoriProdaju(artikal: any) {
@@ -275,10 +417,89 @@ export default function InventoryDashboard() {
     setShowRezervacija(true)
   }
 
+  function otvoriDugovanjaModal() {
+    setDugovanjaTab('osobe')
+    setOtvorenaOsoba(null)
+    setIzabraneStavke(new Set())
+    setShowRezervisaniModal(true)
+  }
+
+  function otvoriPreimenujModal(ime: string) {
+    setPreimenujStaroIme(ime)
+    setPreimenujNovoIme(ime)
+    setShowPreimenujModal(true)
+  }
+
+  async function sacuvajPreimenovanje() {
+    const staro = preimenujStaroIme.trim()
+    const novo = preimenujNovoIme.trim()
+    if (!staro || !novo) {
+      toast.error('Unesi ime.')
+      return
+    }
+    if (staro.toLowerCase() === novo.toLowerCase()) {
+      toast.error('Novo ime je isto kao staro.')
+      return
+    }
+
+    const stavkeZaUpdate = rezervacije.filter(r => r.kome === staro)
+    if (stavkeZaUpdate.length === 0) {
+      toast.error('Nema stavki za ovu osobu.')
+      return
+    }
+
+    const cilj = dugovanjaPoOsobi.find(o => o.kome.toLowerCase() === novo.toLowerCase() && o.kome !== staro)
+    const poruka = cilj
+      ? `Spojiti "${staro}" (${stavkeZaUpdate.length}) sa "${cilj.kome}" (${cilj.stavke.length})?`
+      : `Preimenovati "${staro}" u "${novo}"? (${stavkeZaUpdate.length} stavki)`
+
+    if (!confirm(poruka)) return
+
+    setLoading(true)
+    try {
+      const ids = stavkeZaUpdate.map(r => r.id)
+      const { error } = await supabase
+        .from('rezervacije')
+        .update({ kome: cilj ? cilj.kome : novo })
+        .in('id', ids)
+
+      if (error) {
+        toast.error('Greška pri izmeni imena.')
+        setLoading(false)
+        return
+      }
+
+      const finalnoIme = cilj ? cilj.kome : novo
+      await ucitajRezervacije()
+      if (otvorenaOsoba === staro) setOtvorenaOsoba(finalnoIme)
+      setShowPreimenujModal(false)
+      toast.success(cilj ? `Spojeno sa "${finalnoIme}"` : `Ime izmenjeno u "${finalnoIme}"`)
+    } catch {
+      toast.error('Greška pri izmeni imena!')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function toggleStavka(id: string) {
+    setIzabraneStavke(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function izracunajCenuStavke(rez: any): number {
+    const artikal = rez.artikli || artikli.find(a => a.id === rez.artikal_id)
+    return Number(artikal?.osnovna_cena ?? 0)
+  }
+
   async function sacuvajRezervaciju() {
     setLoading(true)
     try {
-      if (!rezArtikal || rezKolicina <= 0 || rezKolicina > rezArtikal.kolicina || !rezKome.trim()) {
+      const kome = rezKome.trim()
+      if (!rezArtikal || rezKolicina <= 0 || rezKolicina > rezArtikal.kolicina || !kome) {
         toast.error('Proveri podatke!')
         setLoading(false)
         return
@@ -288,7 +509,7 @@ export default function InventoryDashboard() {
         supabase.from('rezervacije').insert({
           artikal_id: rezArtikal.id,
           kolicina: rezKolicina,
-          kome: rezKome.trim(),
+          kome,
           napomena: rezNapomena.trim() || null,
         }),
       ])
@@ -300,7 +521,7 @@ export default function InventoryDashboard() {
       setArtikli(prev => prev.map(a => a.id === rezArtikal.id ? { ...a, kolicina: a.kolicina - rezKolicina } : a))
       await ucitajRezervacije()
       await ucitajArtikle()
-      toast.success(`Rezervisano ${rezKolicina} × ${rezArtikal.naziv} za "${rezKome}"`)
+      toast.success(`Rezervisano ${rezKolicina} × ${rezArtikal.naziv} za "${kome}"`)
     } catch (err) {
       toast.error('Greška pri rezervaciji!')
     } finally {
@@ -309,52 +530,82 @@ export default function InventoryDashboard() {
     }
   }
 
-  async function razduziRezervaciju(rez: any, placeno: boolean) {
+  async function razduziStavke(stavke: any[], placeno: boolean) {
+    if (stavke.length === 0) {
+      toast.error('Nema izabranih stavki.')
+      return
+    }
     setLoading(true)
     try {
-      const osnovnaCena = rez.artikli?.osnovna_cena || artikli.find(a => a.id === rez.artikal_id)?.osnovna_cena || 0
-      const zarada = osnovnaCena * rez.kolicina
-      if (placeno) {
-        const [kasaRes, prodajaRes] = await Promise.all([
-          supabase.from('kasa').update({ stanje_zarada: stanjeKase + zarada }).eq('id', 1),
-          supabase.from('prodaje').insert({
-            artikal_id: rez.artikal_id,
-            kolicina_prodato: rez.kolicina,
-            cena_po_komadu: osnovnaCena,
-            ukupna_zarada: zarada,
-            prodavac_username: currentUser?.username,
-            uloga_prodavac: currentUser?.uloga,
-          }),
-        ])
-        if ((kasaRes as any).error || (prodajaRes as any).error) {
-          toast.error('Greška pri razduženju (plaćeno).')
-          setLoading(false)
-          return
-        }
-        setStanjeKase(prev => prev + zarada)
-        toast.success(`Plaćeno i razduženo: ${rez.kolicina} × ${rez.artikli.naziv}`)
-      } else {
-        const artikal = artikli.find(a => a.id === rez.artikal_id)
-        if (artikal) {
-          const upd = await supabase.from('artikli').update({ kolicina: artikal.kolicina + rez.kolicina }).eq('id', rez.artikal_id)
-          if ((upd as any).error) {
-            toast.error('Greška pri vraćanju na lager.')
+      let trenutnaKasa = stanjeKase
+      for (const rez of stavke) {
+        const artikal = rez.artikli || artikli.find(a => a.id === rez.artikal_id)
+        const cena = Number(artikal?.osnovna_cena ?? 0)
+        const zarada = cena * rez.kolicina
+        const naziv = rez.artikli?.naziv || artikal?.naziv || 'artikal'
+
+        if (placeno) {
+          const [kasaRes, prodajaRes] = await Promise.all([
+            supabase.from('kasa').update({ stanje_zarada: trenutnaKasa + zarada }).eq('id', 1),
+            supabase.from('prodaje').insert({
+              artikal_id: rez.artikal_id,
+              kolicina_prodato: rez.kolicina,
+              cena_po_komadu: cena,
+              ukupna_zarada: zarada,
+              prodavac_username: currentUser?.username,
+              uloga_prodavac: currentUser?.uloga,
+            }),
+          ])
+          if ((kasaRes as any).error || (prodajaRes as any).error) {
+            toast.error('Greška pri razduženju (plaćeno).')
             setLoading(false)
             return
           }
-          setArtikli(prev => prev.map(a => a.id === rez.artikal_id ? { ...a, kolicina: a.kolicina + rez.kolicina } : a))
+          trenutnaKasa += zarada
+        } else {
+          const art = artikli.find(a => a.id === rez.artikal_id)
+          if (art) {
+            const upd = await supabase.from('artikli').update({ kolicina: art.kolicina + rez.kolicina }).eq('id', rez.artikal_id)
+            if ((upd as any).error) {
+              toast.error('Greška pri vraćanju na lager.')
+              setLoading(false)
+              return
+            }
+          }
         }
-        toast.success(`Vraćeno na lager: ${rez.kolicina} × ${rez.artikli.naziv}`)
+
+        const updRez = await supabase.from('rezervacije').update({ razduzeno: true }).eq('id', rez.id)
+        if ((updRez as any).error) {
+          toast.error('Greška pri zatvaranju stavke.')
+          setLoading(false)
+          return
+        }
       }
-      await supabase.from('rezervacije').update({ razduzeno: true }).eq('id', rez.id)
+
+      setStanjeKase(trenutnaKasa)
       await ucitajRezervacije()
       await ucitajArtikle()
       await ucitajKasu()
+      setIzabraneStavke(new Set())
+
+      if (placeno) {
+        toast.success(`Plaćeno ${stavke.length} stavki — ukupno ${stavke.reduce((s, r) => s + izracunajCenuStavke(r) * r.kolicina, 0).toFixed(2)} €`)
+      } else {
+        toast.success(`Vraćeno na lager: ${stavke.length} stavki`)
+      }
+
+      if (otvorenaOsoba && osobaDetalj && stavke.length === osobaDetalj.stavke.length) {
+        setOtvorenaOsoba(null)
+      }
     } catch (err) {
       toast.error('Greška pri razduženju!')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function razduziRezervaciju(rez: any, placeno: boolean) {
+    await razduziStavke([rez], placeno)
   }
 
   async function sacuvajArtikal(e: React.FormEvent) {
@@ -529,6 +780,54 @@ export default function InventoryDashboard() {
   const totalPages = Math.ceil(filtrirani.length / perPage)
   const dostupneKategorije = kategorije.filter(k => isAdmin || !skrivenoZaOstale.includes(k))
 
+  const dugovanjaPoOsobi: OsobaDugovanje[] = (() => {
+    const map = new Map<string, any[]>()
+    for (const rez of rezervacije) {
+      const key = rez.kome
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(rez)
+    }
+    return Array.from(map.entries())
+      .map(([kome, stavke]) => {
+        const ukupno = stavke.reduce((sum, rez) => sum + izracunajCenuStavke(rez) * rez.kolicina, 0)
+        const dana = Math.max(...stavke.map(s => danaOd(s.datum_rezervacije)))
+        return { kome, stavke, ukupno, dana }
+      })
+      .sort((a, b) => b.dana - a.dana || b.ukupno - a.ukupno)
+  })()
+
+  const ukupnoDugovanja = dugovanjaPoOsobi.reduce((sum, o) => sum + o.ukupno, 0)
+  const brojOsobaDugovanja = dugovanjaPoOsobi.length
+  const osobaDetalj = otvorenaOsoba ? dugovanjaPoOsobi.find(o => o.kome === otvorenaOsoba) : null
+
+  const predloziZaRezervaciju = dugovanjaPoOsobi.map(o => ({
+    name: o.kome,
+    count: o.stavke.length,
+  }))
+
+  const predloziImenaOsoba = (() => {
+    const map = new Map<string, string>()
+    for (const p of profiles) {
+      const key = p.username.toLowerCase()
+      if (!map.has(key)) map.set(key, p.username)
+    }
+    for (const o of dugovanjaPoOsobi) {
+      const key = o.kome.toLowerCase()
+      if (!map.has(key)) map.set(key, o.kome)
+    }
+    if (preimenujStaroIme) map.delete(preimenujStaroIme.toLowerCase())
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'sr'))
+  })()
+
+  const spajanjeCilj = preimenujNovoIme.trim()
+    ? dugovanjaPoOsobi.find(o =>
+        o.kome.toLowerCase() === preimenujNovoIme.trim().toLowerCase() &&
+        o.kome !== preimenujStaroIme
+      )
+    : null
+
+  const stavkeZaPreimenovanje = rezervacije.filter(r => r.kome === preimenujStaroIme)
+
   const dohvatiIkonu = (kategorija: string | null) => {
     if (!kategorija) return CubeIcon
     if (kategorija.toUpperCase().includes('LCD')) return DevicePhoneMobileIcon
@@ -561,7 +860,7 @@ export default function InventoryDashboard() {
                   <p className="text-xl font-bold text-white">{currentUser.username}</p>
                 </div>
                 <span className={`px-5 py-2 rounded-full text-white font-bold text-sm shadow-md ${ulogaBoja[currentUser.uloga] || 'bg-gray-600'}`}>
-                  {currentUser.uloga.toUpperCase()}
+                  {ulogaNaziv[currentUser.uloga]}
                 </span>
                 <button onClick={logout} className="bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-xl px-5 py-3 flex items-center gap-2 transition shadow-md">
                   <ArrowRightOnRectangleIcon className="w-5 h-5" />
@@ -576,7 +875,7 @@ export default function InventoryDashboard() {
               </div>
               <div className="flex items-center gap-3">
                 <span className={`px-3 py-1 rounded-full text-white text-xs font-bold ${ulogaBoja[currentUser.uloga] || 'bg-gray-600'}`}>
-                  {currentUser.uloga.toUpperCase()}
+                  {ulogaNaziv[currentUser.uloga]}
                 </span>
                 <button onClick={logout} className="bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-xl px-3 py-2 flex items-center gap-2 transition shadow-md text-white text-sm">
                   <ArrowRightOnRectangleIcon className="w-5 h-5" />
@@ -589,10 +888,14 @@ export default function InventoryDashboard() {
           {isAdmin && (
             <div className="px-8 py-5 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
               <div className="flex flex-wrap items-center justify-start gap-4">
-                <a href="/admin/prodaje" className="flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/50 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 px-4 py-2 rounded-lg">
+                <Link href="/admin/prodaje" className="flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/50 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 px-4 py-2 rounded-lg">
                   <ChartBarIcon className="w-5 h-5" />
                   Pregled prodaja
-                </a>
+                </Link>
+                <Link href="/admin/korisnici" className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900/50 dark:hover:bg-slate-900/70 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg">
+                  <UserIcon className="w-5 h-5" />
+                  Korisnici
+                </Link>
                 <button onClick={() => { setShowKriticniModal(true); setKriticniFilter('lte1') }} className="relative flex items-center gap-2 bg-orange-100 hover:bg-orange-200 dark:bg-orange-900/50 dark:hover:bg-orange-900/70 text-orange-700 dark:text-orange-200 px-4 py-2 rounded-lg">
                   <ExclamationTriangleIcon className="w-5 h-5" />
                   Kritično stanje
@@ -602,12 +905,12 @@ export default function InventoryDashboard() {
                     </span>
                   )}
                 </button>
-                <button onClick={() => setShowRezervisaniModal(true)} className="relative flex items-center gap-2 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/50 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-200 px-4 py-2 rounded-lg">
-                  <ClockIcon className="w-5 h-5" />
-                  Rezervisani artikli
-                  {rezervacije.length > 0 && (
+                <button onClick={otvoriDugovanjaModal} className="relative flex items-center gap-2 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/50 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-200 px-4 py-2 rounded-lg">
+                  <UserGroupIcon className="w-5 h-5" />
+                  Otvorena dugovanja
+                  {brojOsobaDugovanja > 0 && (
                     <span className="absolute -top-2 -right-2 bg-yellow-500 text-white text-xs font-bold rounded-full h-7 w-7 flex items-center justify-center shadow-lg">
-                      {rezervacije.length}
+                      {brojOsobaDugovanja}
                     </span>
                   )}
                 </button>
@@ -624,46 +927,81 @@ export default function InventoryDashboard() {
           )}
         </div>
 
-        {/* INFO BAR */}
+        {/* INFO BAR — sakriveno dok se ne klikne */}
         {isAdmin && (
           <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="p-6">
-              <div className="flex flex-wrap items-center justify-between gap-6">
-                <div className="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
-                  <div className="bg-indigo-600 dark:bg-indigo-500 rounded-xl p-3">
-                    <CubeIcon className="w-8 h-8 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Vrednost lagera</p>
-                    <p className="text-3xl font-extrabold text-indigo-700 dark:text-indigo-400">{novacULageru.toFixed(2)} €</p>
-                  </div>
+            <button
+              type="button"
+              onClick={() => setShowInfoBar(prev => !prev)}
+              className="w-full px-6 py-4 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="bg-indigo-100 dark:bg-indigo-900/50 rounded-xl p-2.5">
+                  <ChartBarIcon className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                 </div>
-                <div className="flex items-center gap-4 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
-                  <div className="bg-green-600 dark:bg-green-500 rounded-xl p-3">
-                    <CurrencyEuroIcon className="w-8 h-8 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Stanje kase</p>
-                    <p className="text-3xl font-extrabold text-green-700 dark:text-green-400">{stanjeKase.toFixed(2)} €</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
-                  <div className="bg-purple-600 dark:bg-purple-500 rounded-xl p-3">
-                    <ShoppingBagIcon className="w-8 h-8 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Ukupno artikala</p>
-                    <p className="text-3xl font-extrabold text-purple-700 dark:text-purple-400">{artikli.length}</p>
-                  </div>
-                </div>
-                <div className="flex items-center">
-                  <button onClick={() => setShowResetConfirm(true)} className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl transition transform">
-                    <TrashIcon className="w-6 h-6" />
-                    Resetuj kasu
-                  </button>
+                <div>
+                  <p className="font-semibold text-gray-800 dark:text-gray-100">Pregled stanja</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {showInfoBar ? 'Klikni da sakriješ' : 'Klikni za vrednost lagera, kasu, dugovanja...'}
+                  </p>
                 </div>
               </div>
-            </div>
+              <ChevronDownIcon className={`w-6 h-6 text-gray-400 shrink-0 transition-transform duration-200 ${showInfoBar ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showInfoBar && (
+              <div className="p-6 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex flex-wrap items-center justify-between gap-6">
+                  <div className="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+                    <div className="bg-indigo-600 dark:bg-indigo-500 rounded-xl p-3">
+                      <CubeIcon className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Vrednost lagera</p>
+                      <p className="text-3xl font-extrabold text-indigo-700 dark:text-indigo-400">{novacULageru.toFixed(2)} €</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+                    <div className="bg-green-600 dark:bg-green-500 rounded-xl p-3">
+                      <CurrencyEuroIcon className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Stanje kase</p>
+                      <p className="text-3xl font-extrabold text-green-700 dark:text-green-400">{stanjeKase.toFixed(2)} €</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={otvoriDugovanjaModal}
+                    className="flex items-center gap-4 bg-gradient-to-r from-amber-50 to-orange-100 dark:from-amber-900/30 dark:to-orange-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px] text-left hover:shadow-lg transition"
+                  >
+                    <div className="bg-amber-600 dark:bg-amber-500 rounded-xl p-3">
+                      <UserGroupIcon className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Na dugovanju</p>
+                      <p className="text-3xl font-extrabold text-amber-700 dark:text-amber-400">{ukupnoDugovanja.toFixed(2)} €</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{brojOsobaDugovanja} {brojOsobaDugovanja === 1 ? 'osoba' : 'osobe'} · {rezervacije.length} stavki</p>
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-4 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 rounded-2xl px-6 py-4 shadow-md flex-1 min-w-[220px]">
+                    <div className="bg-purple-600 dark:bg-purple-500 rounded-xl p-3">
+                      <ShoppingBagIcon className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">Ukupno artikala</p>
+                      <p className="text-3xl font-extrabold text-purple-700 dark:text-purple-400">{artikli.length}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center">
+                    <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl transition">
+                      <CurrencyEuroIcon className="w-6 h-6" />
+                      Resetuj kasu
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -721,7 +1059,13 @@ export default function InventoryDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((art) => {
+                {paginated.length === 0 ? (
+                  <tr>
+                    <td colSpan={isAdmin ? 6 : 3} className="p-12 text-center text-gray-500 dark:text-gray-400">
+                      Nema artikala za izabrani filter. Pokušaj drugu pretragu ili kategoriju.
+                    </td>
+                  </tr>
+                ) : paginated.map((art) => {
                   const jeKriticno = art.kolicina <= 1
                   const jeUpozorenje = art.kolicina <= 3 && art.kolicina > 1
                   const Ikonica = dohvatiIkonu(art.kategorija)
@@ -749,14 +1093,16 @@ export default function InventoryDashboard() {
 
                       <td className={`p-4 text-right font-bold text-xl ${jeKriticno ? 'text-red-600' : jeUpozorenje ? 'text-orange-600' : ''}`}>
                         {art.kolicina}
+                        {jeKriticno && <span className="block text-xs font-normal text-red-500">kritično</span>}
+                        {jeUpozorenje && <span className="block text-xs font-normal text-orange-500">malo</span>}
                       </td>
 
                       {isAdmin && (
                         <td className="p-4 text-center space-x-4">
-                          <button onClick={() => otvoriProdaju(art)} className="text-green-600 hover:text-green-800"><ShoppingBagIcon className="w-6 h-6 inline" /></button>
-                          <button onClick={() => otvoriRezervaciju(art)} className="text-orange-600 hover:text-orange-800"><ClockIcon className="w-6 h-6 inline" /></button>
-                          <button onClick={() => izmeniArtikal(art)} className="text-blue-600 hover:text-blue-800"><PencilSquareIcon className="w-6 h-6 inline" /></button>
-                          <button onClick={() => obrisiArtikal(art.id)} className="text-red-600 hover:text-red-800"><TrashIcon className="w-6 h-6 inline" /></button>
+                          <button onClick={() => otvoriProdaju(art)} title="Prodaj" aria-label="Prodaj" className="text-green-600 hover:text-green-800"><ShoppingBagIcon className="w-6 h-6 inline" /></button>
+                          <button onClick={() => otvoriRezervaciju(art)} title="Rezerviši" aria-label="Rezerviši" className="text-orange-600 hover:text-orange-800"><ClockIcon className="w-6 h-6 inline" /></button>
+                          <button onClick={() => izmeniArtikal(art)} title="Izmeni" aria-label="Izmeni artikal" className="text-blue-600 hover:text-blue-800"><PencilSquareIcon className="w-6 h-6 inline" /></button>
+                          <button onClick={() => obrisiArtikal(art.id)} title="Obriši" aria-label="Obriši artikal" className="text-red-600 hover:text-red-800"><TrashIcon className="w-6 h-6 inline" /></button>
                         </td>
                       )}
                     </tr>
@@ -768,7 +1114,11 @@ export default function InventoryDashboard() {
 
           {/* Mobile cards */}
           <div className="block lg:hidden space-y-5 px-2 pb-4">
-            {paginated.map((art) => {
+            {paginated.length === 0 ? (
+              <p className="text-center py-12 text-gray-500 dark:text-gray-400">
+                Nema artikala za izabrani filter.
+              </p>
+            ) : paginated.map((art) => {
               const Ikonica = dohvatiIkonu(art.kategorija)
               const cenaInfo = currentUser?.uloga === 'kolega' ? { cena: art.cena_kolega, label: 'Cena kolega' } :
                               currentUser?.uloga === 'serviser' ? { cena: art.cena_serviser, label: 'Cena serviser' } :
@@ -805,16 +1155,16 @@ export default function InventoryDashboard() {
                   </div>
                   {isAdmin && (
                     <div className="px-5 py-4 bg-gray-100 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-700 flex justify-center gap-8">
-                      <button onClick={() => otvoriProdaju(art)} className="p-4 bg-green-100 dark:bg-green-900/50 rounded-xl hover:bg-green-200 dark:hover:bg-green-900/70 transition shadow-md">
+                      <button onClick={() => otvoriProdaju(art)} title="Prodaj" aria-label="Prodaj" className="p-4 bg-green-100 dark:bg-green-900/50 rounded-xl hover:bg-green-200 dark:hover:bg-green-900/70 transition shadow-md">
                         <ShoppingBagIcon className="w-7 h-7 text-green-600 dark:text-green-400" />
                       </button>
-                      <button onClick={() => otvoriRezervaciju(art)} className="p-4 bg-orange-100 dark:bg-orange-900/50 rounded-xl hover:bg-orange-200 dark:hover:bg-orange-900/70 transition shadow-md">
+                      <button onClick={() => otvoriRezervaciju(art)} title="Rezerviši" aria-label="Rezerviši" className="p-4 bg-orange-100 dark:bg-orange-900/50 rounded-xl hover:bg-orange-200 dark:hover:bg-orange-900/70 transition shadow-md">
                         <ClockIcon className="w-7 h-7 text-orange-600 dark:text-orange-400" />
                       </button>
-                      <button onClick={() => izmeniArtikal(art)} className="p-4 bg-blue-100 dark:bg-blue-900/50 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-900/70 transition shadow-md">
+                      <button onClick={() => izmeniArtikal(art)} title="Izmeni" aria-label="Izmeni" className="p-4 bg-blue-100 dark:bg-blue-900/50 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-900/70 transition shadow-md">
                         <PencilSquareIcon className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                       </button>
-                      <button onClick={() => obrisiArtikal(art.id)} className="p-4 bg-red-100 dark:bg-red-900/50 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/70 transition shadow-md">
+                      <button onClick={() => obrisiArtikal(art.id)} title="Obriši" aria-label="Obriši" className="p-4 bg-red-100 dark:bg-red-900/50 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/70 transition shadow-md">
                         <TrashIcon className="w-7 h-7 text-red-600 dark:text-red-400" />
                       </button>
                     </div>
@@ -983,24 +1333,66 @@ export default function InventoryDashboard() {
                 <button onClick={() => setShowRezervacija(false)}><XMarkIcon className="w-8 h-8" /></button>
               </div>
               <p className="text-lg font-medium mb-2">{rezArtikal.naziv}</p>
-              <p className="text-gray-600 mb-4">Na lageru: <strong>{rezArtikal.kolicina}</strong></p>
+              <p className="text-gray-600 dark:text-gray-400 mb-1">Na lageru: <strong>{rezArtikal.kolicina}</strong></p>
+              <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+                Nabavna cena: <strong>{(rezArtikal.osnovna_cena || 0).toFixed(2)} €</strong>
+              </p>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Količina</label>
-                  <input type="number" min="1" max={rezArtikal.kolicina} value={rezKolicina} onChange={e => setRezKolicina(Number(e.target.value))} className="w-full px-4 py-3 border rounded-lg" />
+                  <input type="number" min="1" max={rezArtikal.kolicina} value={rezKolicina} onChange={e => setRezKolicina(Number(e.target.value))} className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2">Za koga</label>
-                  <input type="text" required value={rezKome} onChange={e => setRezKome(e.target.value)} placeholder="Ime, servis..." className="w-full px-4 py-3 border rounded-lg" />
+                  <label className="block text-sm font-medium mb-2">Za koga / kome dao</label>
+                  <input
+                    type="text"
+                    list="rez-kome-predlozi"
+                    required
+                    value={rezKome}
+                    onChange={e => setRezKome(e.target.value)}
+                    placeholder="Upiši ili izaberi iz liste..."
+                    className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  />
+                  <datalist id="rez-kome-predlozi">
+                    {predloziZaRezervaciju.map(item => (
+                      <option key={item.name} value={item.name} />
+                    ))}
+                  </datalist>
+                  {predloziZaRezervaciju.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Iz otvorenih dugovanja — klikni za brzi izbor:</p>
+                      <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
+                        {predloziZaRezervaciju.slice(0, 12).map(item => (
+                          <button
+                            key={item.name}
+                            type="button"
+                            onClick={() => setRezKome(item.name)}
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                              rezKome.toLowerCase() === item.name.toLowerCase()
+                                ? 'bg-orange-600 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-orange-100 dark:hover:bg-orange-900/40'
+                            }`}
+                          >
+                            {item.name}
+                            {item.count > 0 && <span className="ml-1 opacity-70">({item.count})</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Napomena (opcionalno)</label>
-                  <textarea rows={3} value={rezNapomena} onChange={e => setRezNapomena(e.target.value)} className="w-full px-4 py-3 border rounded-lg" />
+                  <textarea rows={3} value={rezNapomena} onChange={e => setRezNapomena(e.target.value)} className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
                 </div>
               </div>
               <div className="flex gap-4 mt-8">
                 <button onClick={() => setShowRezervacija(false)} className="flex-1 py-3 bg-gray-300 hover:bg-gray-400 rounded-lg">Otkaži</button>
-                <button onClick={sacuvajRezervaciju} disabled={loading} className="flex-1 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg disabled:opacity-70">
+                <button
+                  onClick={sacuvajRezervaciju}
+                  disabled={loading}
+                  className="flex-1 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg disabled:opacity-70"
+                >
                   {loading ? 'Rezervišem...' : 'Rezerviši'}
                 </button>
               </div>
@@ -1068,72 +1460,293 @@ export default function InventoryDashboard() {
           </div>
         )}
 
-{showRezervisaniModal && (
-  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-      <div className="sticky top-0 bg-white dark:bg-gray-800 border-b p-6 flex justify-between items-center">
-        <h3 className="text-2xl font-bold text-purple-600 flex items-center gap-3">
-          <ClockIcon className="w-8 h-8" />
-          Rezervisani artikli ({rezervacije.length})
-        </h3>
-        <button onClick={() => setShowRezervisaniModal(false)}>
-          <XMarkIcon className="w-8 h-8" />
-        </button>
-      </div>
-      <div className="p-6">
-        {rezervacije.length === 0 ? (
-          <p className="text-center py-10 text-gray-600">Nema aktivnih rezervacija.</p>
-        ) : (
-          <div className="space-y-4">
-            {rezervacije.map(rez => {
-  // Dohvatamo osnovnu cenu (za zaradu kod plaćanja)
-  const cenaArtikla = rez.artikli?.osnovna_cena || 
-                      artikli.find(a => a.id === rez.artikal_id)?.osnovna_cena || 
-                      0
+        {showRezervisaniModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-white dark:bg-gray-800 border-b p-6 z-10">
+                <div className="flex justify-between items-start gap-4">
+                  <div>
+                    <h3 className="text-2xl font-bold text-purple-600 flex items-center gap-3">
+                      <UserGroupIcon className="w-8 h-8" />
+                      Otvorena dugovanja
+                    </h3>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">
+                      {brojOsobaDugovanja} {brojOsobaDugovanja === 1 ? 'osoba' : 'osobe'} · {rezervacije.length} stavki · ukupno <strong className="text-amber-600">{ukupnoDugovanja.toFixed(2)} €</strong>
+                    </p>
+                  </div>
+                  <button onClick={() => setShowRezervisaniModal(false)}>
+                    <XMarkIcon className="w-8 h-8" />
+                  </button>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={() => { setDugovanjaTab('osobe'); setOtvorenaOsoba(null); setIzabraneStavke(new Set()) }}
+                    className={`px-4 py-2 rounded-lg font-medium ${dugovanjaTab === 'osobe' ? 'bg-purple-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200'}`}
+                  >
+                    Po osobi
+                  </button>
+                  <button
+                    onClick={() => { setDugovanjaTab('sve'); setOtvorenaOsoba(null); setIzabraneStavke(new Set()) }}
+                    className={`px-4 py-2 rounded-lg font-medium ${dugovanjaTab === 'sve' ? 'bg-purple-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200'}`}
+                  >
+                    Sve stavke
+                  </button>
+                </div>
+              </div>
 
-  return (
-    <div key={rez.id} className="bg-purple-50 dark:bg-purple-900/30 rounded-lg p-6">
-      <div className="flex justify-between items-start">
-        <div className="flex-1">
-          <p className="text-xl font-bold">{rez.artikli?.naziv || 'Nepoznat artikal'}</p>
-          <p>Količina: <strong>{rez.kolicina}</strong></p>
-          <p>Za: <strong>{rez.kome}</strong></p>
-          {rez.napomena && <p className="text-sm text-gray-600 mt-2">Napomena: {rez.napomena}</p>}
-          <p className="text-sm text-gray-500 mt-2">
-            Datum: {new Date(rez.datum_rezervacije).toLocaleString('sr-RS')}
-          </p>
+              <div className="p-6">
+                {rezervacije.length === 0 ? (
+                  <p className="text-center py-10 text-gray-600">Nema otvorenih dugovanja.</p>
+                ) : dugovanjaTab === 'osobe' && !otvorenaOsoba ? (
+                  <div className="space-y-3">
+                    {dugovanjaPoOsobi.map(osoba => {
+                      return (
+                        <div
+                          key={osoba.kome}
+                          className="w-full bg-purple-50 dark:bg-purple-900/30 hover:bg-purple-100 dark:hover:bg-purple-900/50 rounded-xl p-5 flex items-center justify-between transition"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => { setOtvorenaOsoba(osoba.kome); setIzabraneStavke(new Set()) }}
+                            className="flex items-center gap-4 flex-1 text-left min-w-0"
+                          >
+                            <div className="bg-purple-600 rounded-full p-3 shrink-0">
+                              <UserIcon className="w-6 h-6 text-white" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xl font-bold truncate">{osoba.kome}</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {osoba.stavke.length} {osoba.stavke.length === 1 ? 'stavka' : 'stavke'} · nabavna cena
+                              </p>
+                            </div>
+                          </button>
+                          <div className="flex items-center gap-3 shrink-0 ml-3">
+                            <div className="text-right">
+                              <p className="text-2xl font-extrabold text-amber-600">{osoba.ukupno.toFixed(2)} €</p>
+                              <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${badgeStarosti(osoba.dana)}`}>
+                                {osoba.dana === 0 ? 'danas' : `${osoba.dana} d`}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => otvoriPreimenujModal(osoba.kome)}
+                              title="Izmeni ili spoji ime"
+                              className="p-2.5 rounded-lg bg-white/80 dark:bg-gray-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 transition"
+                            >
+                              <PencilSquareIcon className="w-5 h-5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setOtvorenaOsoba(osoba.kome); setIzabraneStavke(new Set()) }}
+                              className="p-2 text-gray-400 hover:text-purple-600"
+                            >
+                              <ChevronRightIcon className="w-6 h-6" />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : dugovanjaTab === 'osobe' && osobaDetalj ? (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => { setOtvorenaOsoba(null); setIzabraneStavke(new Set()) }}
+                      className="text-purple-600 hover:text-purple-800 font-medium mb-4"
+                    >
+                      ← Nazad na listu osoba
+                    </button>
+                    <div className="bg-gradient-to-r from-purple-50 to-amber-50 dark:from-purple-900/30 dark:to-amber-900/20 rounded-xl p-5 mb-5 flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <h4 className="text-2xl font-bold flex items-center gap-2">
+                          <UserIcon className="w-7 h-7 text-purple-600" />
+                          {osobaDetalj.kome}
+                        </h4>
+                        <p className={`text-sm font-medium mt-1 ${bojaStarosti(osobaDetalj.dana)}`}>
+                          Najstarija stavka: {osobaDetalj.dana === 0 ? 'danas' : `pre ${osobaDetalj.dana} dana`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() => otvoriPreimenujModal(osobaDetalj.kome)}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg font-medium transition"
+                        >
+                          <PencilSquareIcon className="w-5 h-5" />
+                          Izmeni / spoji ime
+                        </button>
+                        <div className="text-right">
+                          <p className="text-sm text-gray-500">Ukupno dugovanje</p>
+                          <p className="text-3xl font-extrabold text-amber-600">{osobaDetalj.ukupno.toFixed(2)} €</p>
+                        </div>
+                      </div>
+                    </div>
 
-          {/* ========= JEDNOSTAVAN PRIKAZ CENE ISPOD ========= */}
-          <p className="text-sm text-gray-700 dark:text-gray-300 mt-3">
-            Cena artikla: <strong>{cenaArtikla.toFixed(2)} €</strong>
-          </p>
-          {/* ================================================ */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <button
+                        onClick={() => razduziStavke(osobaDetalj.stavke, true)}
+                        disabled={loading}
+                        className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-60"
+                      >
+                        Plati sve
+                      </button>
+                      <button
+                        onClick={() => razduziStavke(osobaDetalj.stavke.filter(s => izabraneStavke.has(s.id)), true)}
+                        disabled={loading || izabraneStavke.size === 0}
+                        className="px-5 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium disabled:opacity-60"
+                      >
+                        Plati izabrano ({izabraneStavke.size})
+                      </button>
+                      <button
+                        onClick={() => razduziStavke(osobaDetalj.stavke.filter(s => izabraneStavke.has(s.id)), false)}
+                        disabled={loading || izabraneStavke.size === 0}
+                        className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium disabled:opacity-60"
+                      >
+                        Vrati izabrano
+                      </button>
+                    </div>
 
-        </div>
-        <div className="flex flex-col gap-3 ml-6">
-          <button
-            onClick={() => razduziRezervaciju(rez, true)}
-            className="px-5 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition shadow-md"
-          >
-            Plaćeno
-          </button>
-          <button
-            onClick={() => razduziRezervaciju(rez, false)}
-            className="px-5 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium transition shadow-md"
-          >
-            Vrati na lager
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-})}
+                    <div className="space-y-3">
+                      {osobaDetalj.stavke.map(rez => {
+                        const napomena = prikaziNapomenu(rez.napomena)
+                        const cena = izracunajCenuStavke(rez)
+                        const ukupnoStavka = cena * rez.kolicina
+                        const dana = danaOd(rez.datum_rezervacije)
+                        return (
+                          <div key={rez.id} className="bg-white dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4 flex items-start gap-4">
+                            <input
+                              type="checkbox"
+                              checked={izabraneStavke.has(rez.id)}
+                              onChange={() => toggleStavka(rez.id)}
+                              className="mt-1.5 w-5 h-5 rounded"
+                            />
+                            <div className="flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-lg font-bold">{rez.artikli?.naziv || 'Nepoznat artikal'}</p>
+                                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${badgeStarosti(dana)}`}>
+                                  {dana === 0 ? 'danas' : `${dana} d`}
+                                </span>
+                              </div>
+                              <p className="text-gray-600 dark:text-gray-300 mt-1">
+                                {rez.kolicina} × {cena.toFixed(2)} € (nabavna) = <strong>{ukupnoStavka.toFixed(2)} €</strong>
+                              </p>
+                              {napomena && <p className="text-sm text-gray-500 mt-1">{napomena}</p>}
+                              <p className="text-xs text-gray-400 mt-1">{new Date(rez.datum_rezervacije).toLocaleString('sr-RS')}</p>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <button onClick={() => razduziRezervaciju(rez, true)} disabled={loading} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm disabled:opacity-60">Plaćeno</button>
+                              <button onClick={() => razduziRezervaciju(rez, false)} disabled={loading} className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm disabled:opacity-60">Vrati</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {rezervacije.map(rez => {
+                      const napomena = prikaziNapomenu(rez.napomena)
+                      const cena = izracunajCenuStavke(rez)
+                      const dana = danaOd(rez.datum_rezervacije)
+                      return (
+                        <div key={rez.id} className="bg-purple-50 dark:bg-purple-900/30 rounded-lg p-5 flex justify-between items-start gap-4">
+                          <div className="flex-1">
+                            <p className="text-lg font-bold">{rez.artikli?.naziv || 'Nepoznat artikal'}</p>
+                            <p className="mt-1">Za: <strong>{rez.kome}</strong> · {rez.kolicina} kom · <strong>{(cena * rez.kolicina).toFixed(2)} €</strong> (nabavna)</p>
+                            {napomena && <p className="text-sm text-gray-500 mt-1">{napomena}</p>}
+                            <p className={`text-sm mt-1 ${bojaStarosti(dana)}`}>{new Date(rez.datum_rezervacije).toLocaleString('sr-RS')} · {dana === 0 ? 'danas' : `${dana} dana`}</p>
+                          </div>
+                          <div className="flex flex-col gap-2">
+                            <button onClick={() => razduziRezervaciju(rez, true)} disabled={loading} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm disabled:opacity-60">Plaćeno</button>
+                            <button onClick={() => razduziRezervaciju(rez, false)} disabled={loading} className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm disabled:opacity-60">Vrati</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
-      </div>
-    </div>
-  </div>
-)}
+
+        {showPreimenujModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-8">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold flex items-center gap-3 text-blue-600">
+                  <PencilSquareIcon className="w-8 h-8" />
+                  Izmeni / spoji ime
+                </h3>
+                <button onClick={() => setShowPreimenujModal(false)}><XMarkIcon className="w-8 h-8" /></button>
+              </div>
+
+              <p className="text-gray-600 dark:text-gray-300 mb-4">
+                Trenutno ime: <strong className="text-gray-900 dark:text-white">{preimenujStaroIme}</strong>
+                <span className="text-sm text-gray-500 ml-2">({stavkeZaPreimenovanje.length} stavki)</span>
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Novo ime</label>
+                  <input
+                    type="text"
+                    list="osobe-predlozi"
+                    value={preimenujNovoIme}
+                    onChange={e => setPreimenujNovoIme(e.target.value)}
+                    placeholder="npr. Mario"
+                    className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700"
+                  />
+                  <datalist id="osobe-predlozi">
+                    {predloziImenaOsoba.map(ime => (
+                      <option key={ime} value={ime} />
+                    ))}
+                  </datalist>
+                </div>
+
+                {predloziImenaOsoba.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-500 mb-2">Brzi izbor (spoji sa postojećom osobom)</p>
+                    <div className="flex flex-wrap gap-2">
+                      {predloziImenaOsoba.slice(0, 12).map(ime => (
+                        <button
+                          key={ime}
+                          type="button"
+                          onClick={() => setPreimenujNovoIme(ime)}
+                          className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                            preimenujNovoIme.toLowerCase() === ime.toLowerCase()
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-blue-100 dark:hover:bg-blue-900/40'
+                          }`}
+                        >
+                          {ime}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {spajanjeCilj && (
+                  <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-4 text-sm text-amber-800 dark:text-amber-200">
+                    <strong>Spajanje:</strong> „{preimenujStaroIme}“ ({stavkeZaPreimenovanje.length} stavki) biće spojeno sa „{spajanjeCilj.kome}“ ({spajanjeCilj.stavke.length} stavki) → ukupno {stavkeZaPreimenovanje.length + spajanjeCilj.stavke.length} stavki.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-4 mt-8">
+                <button onClick={() => setShowPreimenujModal(false)} className="flex-1 py-3 bg-gray-300 hover:bg-gray-400 rounded-lg">Otkaži</button>
+                <button
+                  onClick={sacuvajPreimenovanje}
+                  disabled={loading || !preimenujNovoIme.trim() || preimenujStaroIme.toLowerCase() === preimenujNovoIme.trim().toLowerCase()}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-60"
+                >
+                  {loading ? 'Čuvam...' : spajanjeCilj ? 'Spoji osobe' : 'Sačuvaj ime'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showVrednostPoKategorijama && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
@@ -1169,7 +1782,8 @@ export default function InventoryDashboard() {
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-8">
               <h3 className="text-2xl font-bold text-red-600 mb-6 text-center">Reset kase na 0 €?</h3>
-              <input type="password" placeholder="Unesi kod (1234)" value={resetCode} onChange={e => setResetCode(e.target.value)} className="w-full px-5 py-4 border border-gray-300 dark:border-gray-600 rounded-xl text-lg mb-6 focus:ring-4 focus:ring-red-400" autoFocus />
+              <p className="text-gray-600 dark:text-gray-400 text-center mb-4">Unesi administratorski kod za potvrdu.</p>
+              <input type="password" placeholder="Unesi kod" value={resetCode} onChange={e => setResetCode(e.target.value)} className="w-full px-5 py-4 border border-gray-300 dark:border-gray-600 rounded-xl text-lg mb-6 focus:ring-4 focus:ring-red-400" autoFocus />
               <div className="flex gap-4">
                 <button onClick={() => { setShowResetConfirm(false); setResetCode('') }} className="flex-1 py-4 bg-gray-300 hover:bg-gray-400 rounded-xl font-bold transition">Otkaži</button>
                 <button onClick={izvrsiResetKase} disabled={loading} className="flex-1 py-4 bg-red-600 hover:bg-red-700 disabled:opacity-70 text-white rounded-xl font-bold transition">

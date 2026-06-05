@@ -2,6 +2,8 @@
 import { supabase } from '@/lib/supabase'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import toast, { Toaster } from 'react-hot-toast'
+import AdminNav from '@/components/AdminNav'
 import {
   ArrowDownTrayIcon,
   CalendarDaysIcon,
@@ -53,6 +55,7 @@ export default function PregledProdaja() {
         .single()
 
       if (profileError || !profile || profile.uloga !== 'admin') {
+        toast.error('Nemaš pristup ovoj stranici.')
         router.push('/')
         return
       }
@@ -64,6 +67,26 @@ export default function PregledProdaja() {
     init()
   }, [])
 
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (showResetConfirm) {
+        setShowResetConfirm(false)
+        setResetCode('')
+        return
+      }
+      if (stornoModal) {
+        setStornoModal(false)
+        return
+      }
+      if (editModal) {
+        setEditModal(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showResetConfirm, stornoModal, editModal])
+
   const ucitajProdaje = async () => {
     const { data: p, error } = await supabase
       .from('prodaje')
@@ -74,6 +97,7 @@ export default function PregledProdaja() {
       setProdaje(p || [])
     } else {
       console.error('Greška pri učitavanju:', error)
+      toast.error('Greška pri učitavanju prodaja.')
     }
   }
 
@@ -231,7 +255,7 @@ const ukupnaRealnaMarza = useMemo(() => {
   }
 
   const obrisiProdaja = async (prodajaId: string) => {
-    if (!confirm('STALNO OBRIŠI ovu prodaju? Nepovratno!')) return
+    if (!confirm('PAŽNJA: Trajno brisanje NE vraća robu na lager i NE menja kasu.\n\nZa ispravku koristi STORNO.\n\nDa li ipak želiš da obrišeš zapis?')) return
 
     setLoadingAction(true)
     try {
@@ -279,12 +303,14 @@ const ukupnaRealnaMarza = useMemo(() => {
   }
 
   if (loading || !currentUser) {
-    return <div className="p-10 text-center text-xl">Učitavanje...</div>
+    return <div className="min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300 text-xl">Učitavanje...</div>
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 sm:p-8">
+      <Toaster position="top-right" />
       <div className="max-w-7xl mx-auto">
+        <AdminNav active="prodaje" />
         {/* HEADER */}
         <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-8 rounded-xl shadow-lg mb-8">
           <h1 className="text-4xl font-bold mb-6 flex items-center gap-4 justify-center">
@@ -314,19 +340,12 @@ const ukupnaRealnaMarza = useMemo(() => {
                 <ArrowDownTrayIcon className="w-6 h-6" />
                 Preuzmi CSV
               </button>
-              <a
-                href="/admin/obavestenja"
-                className="bg-orange-600 hover:bg-orange-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-3"
-              >
-                <ExclamationTriangleIcon className="w-6 h-6" />
-                Obaveštenja lager
-              </a>
             </div>
           </div>
         </div>
 
         {/* FILTERI */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 border border-gray-200 dark:border-gray-700">
           <h2 className="text-xl font-semibold mb-4">Filteri</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <div className="relative">
@@ -371,7 +390,7 @@ const ukupnaRealnaMarza = useMemo(() => {
         </div>
 
         {/* TABELA */}
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-10">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-10 border border-gray-200 dark:border-gray-700">
           <div className="p-6 border-b bg-gray-50">
             <h2 className="text-2xl font-bold flex items-center gap-3">
               <CalendarDaysIcon className="w-8 h-8 text-indigo-600" />
@@ -453,7 +472,7 @@ const ukupnaRealnaMarza = useMemo(() => {
                             <button
                               onClick={() => obrisiProdaja(p.id)}
                               disabled={loadingAction}
-                              title="Obriši"
+                              title="Trajno obriši (ne koristi storno!)"
                               className="p-1 text-red-600 hover:bg-red-100 hover:text-red-800 rounded disabled:opacity-50 transition"
                             >
                               <TrashIcon className="w-4 h-4" />
@@ -490,14 +509,6 @@ const ukupnaRealnaMarza = useMemo(() => {
           )}
         </div>
 
-        <div className="text-center">
-          <button
-            onClick={() => router.push('/')}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-12 py-5 rounded-xl font-bold text-xl transition shadow-lg"
-          >
-            ← Nazad na dashboard
-          </button>
-        </div>
       </div>
 
       {/* EDIT MODAL */}
@@ -593,13 +604,13 @@ const ukupnaRealnaMarza = useMemo(() => {
               UPOZORENJE: Reset SVIH prodaja!
             </h2>
             <p className="text-lg mb-6 text-center">
-              Ova akcija je <strong>nepovratna</strong>. Unesi kod: <strong>1234</strong>
+              Ova akcija je <strong>nepovratna</strong>. Unesi administratorski kod za potvrdu.
             </p>
             <input
-              type="text"
+              type="password"
               value={resetCode}
               onChange={(e) => setResetCode(e.target.value)}
-              placeholder="Unesi 1234"
+              placeholder="Unesi kod"
               className="w-full p-4 border-2 border-red-300 rounded-lg text-xl text-center mb-6 focus:outline-none focus:ring-4 focus:ring-red-300"
               autoFocus
             />

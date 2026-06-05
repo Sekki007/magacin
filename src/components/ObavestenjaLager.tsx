@@ -26,10 +26,6 @@ export default function ObavestenjaLager() {
           setNiskiLager([])
         } else {
           setNiskiLager(data || [])
-          if (data && data.length > 0) {
-            console.log('Obaveštenje: Niski lager artikala!', data)
-            // Opcionalno: ovde možeš dodati toast, email, itd.
-          }
         }
       } catch (err) {
         console.error('Neočekivana greška:', err)
@@ -52,16 +48,9 @@ export default function ObavestenjaLager() {
           schema: 'public',
           table: 'artikli',
         },
-        (payload) => {
-          console.log('Promena u artiklima:', payload)
-          ucitajNiskiLager() // osveži listu kad god dođe promena
-        }
+        () => ucitajNiskiLager()
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('Pretplaćen na realtime promene artikala')
-        }
-      })
+      .subscribe()
 
     // Cleanup pri unmount-u
     return () => {
@@ -71,40 +60,37 @@ export default function ObavestenjaLager() {
 
   // Funkcija za preusmeravanje na izmenu artikla (npr. na dashboard ili posebnu stranicu)
   const idiNaIzmenu = (artikalId: string) => {
-    // Ako imaš dashboard gde možeš menjati artikle, preusmeri tamo
     router.push(`/?edit=${artikalId}`)
-    // Ili ako imaš posebnu admin stranicu za artikle:
-    // router.push(`/admin/artikli?edit=${artikalId}`)
   }
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-8">
-        <div className="p-10 text-center">Učitavanje obaveštenja...</div>
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-200 dark:border-gray-700">
+        <div className="p-10 text-center text-gray-600 dark:text-gray-300">Učitavanje obaveštenja...</div>
       </div>
     )
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-8">
-      <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-200 dark:border-gray-700">
+      <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 text-gray-900 dark:text-white">
         <ExclamationTriangleIcon className="w-8 h-8 text-red-600" />
-        Obaveštenja o niskom lageru (količina {"<"} 2)
+        Obaveštenja o niskom lageru (količina {'<'} 2)
       </h2>
 
       {niskiLager.length === 0 ? (
-        <p className="text-center text-gray-600 text-lg py-8">
-          Svi artikli su na zadovoljavajućem stanju. 👍
+        <p className="text-center text-gray-600 dark:text-gray-400 text-lg py-8">
+          Svi artikli su na zadovoljavajućem stanju.
         </p>
       ) : (
         <div className="grid gap-4">
           {niskiLager.map((art) => (
             <div
               key={art.id}
-              className="bg-red-50 border border-red-200 p-6 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+              className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-6 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
             >
               <div>
-                <p className="font-semibold text-lg">{art.naziv}</p>
+                <p className="font-semibold text-lg text-gray-900 dark:text-white">{art.naziv}</p>
                 <p className="text-red-700 font-bold text-xl">Količina: {art.kolicina}</p>
                 <p className="text-sm text-gray-500">
                   Unos: {new Date(art.created_at).toLocaleDateString('sr-RS')}

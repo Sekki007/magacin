@@ -2,6 +2,7 @@
 
 import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
+import toast from 'react-hot-toast'
 
 type UserProfile = {
   id: string
@@ -34,7 +35,7 @@ export default function UserManagement() {
       setUsers((data as UserProfile[]) || [])
     } catch (err) {
       console.error('Greška pri učitavanju korisnika:', err)
-      alert('Došlo je do greške pri učitavanju korisnika.')
+      toast.error('Greška pri učitavanju korisnika.')
       setUsers([])
     } finally {
       setLoading(false)
@@ -74,7 +75,7 @@ export default function UserManagement() {
       )
     } catch (err) {
       console.error(err)
-      alert('Greška pri promeni statusa!')
+      toast.error('Greška pri promeni statusa!')
     }
   }
 
@@ -93,23 +94,25 @@ export default function UserManagement() {
       )
     } catch (err) {
       console.error(err)
-      alert('Greška pri promeni uloge!')
+      toast.error('Greška pri promeni uloge!')
     }
   }
 
   // Dodavanje novog korisnika – GLAVNA ISPRAVKA OVDE
   const addUser = async () => {
     if (!newUsername.trim() || !newPassword.trim()) {
-      return alert('Unesi username i lozinku!')
+      toast.error('Unesi korisničko ime i lozinku.')
+      return
     }
 
     if (newPassword.length < 6) {
-      return alert('Lozinka mora imati najmanje 6 karaktera!')
+      toast.error('Lozinka mora imati najmanje 6 karaktera.')
+      return
     }
 
     setAdding(true)
     try {
-      const email = `${newUsername.toLowerCase().trim()}@magacin.local`
+      const email = `${newUsername.toLowerCase().trim()}@example.com`
 
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -137,37 +140,36 @@ export default function UserManagement() {
         throw profileError
       }
 
-      alert(`Korisnik "${newUsername}" uspešno dodat!`)
+      toast.success(`Korisnik "${newUsername}" uspešno dodat.`)
       setNewUsername('')
       setNewPassword('')
       setNewRole('kolega')
       loadUsers() // osveži listu
     } catch (err: any) {
       console.error('Greška pri dodavanju korisnika:', err)
-      alert(err.message || 'Greška pri kreiranju korisnika!')
+      toast.error(err.message || 'Greška pri kreiranju korisnika.')
     } finally {
       setAdding(false)
     }
   }
 
   if (loading) {
-    return <div className="p-10 text-center text-xl">Učitavanje korisnika...</div>
+    return <div className="p-10 text-center text-xl text-gray-600 dark:text-gray-300">Učitavanje korisnika...</div>
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-8">
-      <h1 className="text-3xl font-bold mb-8">Upravljanje korisnicima</h1>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Upravljanje korisnicima</h1>
 
-      {/* Forma za dodavanje */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Dodaj novog korisnika</h2>
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dodaj novog korisnika</h2>
         <div className="flex flex-col sm:flex-row gap-4">
           <input
             type="text"
-            placeholder="Username (npr. pera)"
+            placeholder="Korisničko ime (npr. pera)"
             value={newUsername}
             onChange={(e) => setNewUsername(e.target.value)}
-            className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             disabled={adding}
           />
           <input
@@ -175,13 +177,13 @@ export default function UserManagement() {
             placeholder="Lozinka (min 6 karaktera)"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             disabled={adding}
           />
           <select
             value={newRole}
             onChange={(e) => setNewRole(e.target.value as UserProfile['uloga'])}
-            className="border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             disabled={adding}
           >
             <option value="kolega">Kolega</option>
@@ -200,15 +202,15 @@ export default function UserManagement() {
       </div>
 
       {/* Lista korisnika */}
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-200 dark:border-gray-700">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 border-b">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b dark:border-gray-600">
               <tr>
-                <th className="p-4 text-left font-semibold">Username</th>
-                <th className="p-4 text-left font-semibold">Uloga</th>
-                <th className="p-4 text-left font-semibold">Status</th>
-                <th className="p-4 text-left font-semibold">Akcije</th>
+                <th className="p-4 text-left font-semibold text-gray-900 dark:text-white">Korisničko ime</th>
+                <th className="p-4 text-left font-semibold text-gray-900 dark:text-white">Uloga</th>
+                <th className="p-4 text-left font-semibold text-gray-900 dark:text-white">Status</th>
+                <th className="p-4 text-left font-semibold text-gray-900 dark:text-white">Akcije</th>
               </tr>
             </thead>
             <tbody>
@@ -220,8 +222,8 @@ export default function UserManagement() {
                 </tr>
               ) : (
                 users.map((u) => (
-                  <tr key={u.id} className="border-b hover:bg-gray-50 transition">
-                    <td className="p-4 font-medium">{u.username}</td>
+                  <tr key={u.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                    <td className="p-4 font-medium text-gray-900 dark:text-white">{u.username}</td>
                     <td className="p-4">
                       <select
                         value={u.uloga}
