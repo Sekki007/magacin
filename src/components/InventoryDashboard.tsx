@@ -918,6 +918,10 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                   <ChartBarIcon className="w-5 h-5" />
                   Vrednost po kategorijama
                 </button>
+                <Link href="/poklopci" className="flex items-center gap-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 px-4 py-2 rounded-lg font-medium">
+                  <DevicePhoneMobileIcon className="w-5 h-5" />
+                  Zadnji poklopci
+                </Link>
                 <button onClick={otvoriZaDodavanje} className="ml-auto flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-6 py-3 rounded-xl font-bold text-lg">
                   <PlusIcon className="w-6 h-6" />
                   Dodaj novi artikal
