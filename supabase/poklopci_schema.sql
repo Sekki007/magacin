@@ -1,10 +1,25 @@
 -- Poklopci modul — nezavisne tabele od glavnog magacina
 -- Pokreni u Supabase SQL Editor
 
+create table if not exists public.poklopci_modeli (
+  id uuid primary key default gen_random_uuid(),
+  naziv text unique not null,
+  redosled integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.poklopci_boje (
+  id uuid primary key default gen_random_uuid(),
+  naziv text unique not null,
+  redosled integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.poklopci_artikli (
   id uuid primary key default gen_random_uuid(),
   naziv text not null,
-  model text,
+  model text not null,
+  boja text not null,
   kolicina integer not null default 0,
   nabavna_cena numeric(10,2) not null default 0,
   prodajna_cena numeric(10,2) not null default 0,
@@ -42,11 +57,15 @@ values (1, 0)
 on conflict (id) do nothing;
 
 -- Dozvoli pristup aplikaciji (prilagodi ako koristiš RLS na ostalim tabelama)
+alter table public.poklopci_modeli enable row level security;
+alter table public.poklopci_boje enable row level security;
 alter table public.poklopci_artikli enable row level security;
 alter table public.poklopci_rezervacije enable row level security;
 alter table public.poklopci_prodaje enable row level security;
 alter table public.poklopci_kasa enable row level security;
 
+create policy "poklopci_modeli_all" on public.poklopci_modeli for all using (true) with check (true);
+create policy "poklopci_boje_all" on public.poklopci_boje for all using (true) with check (true);
 create policy "poklopci_artikli_all" on public.poklopci_artikli for all using (true) with check (true);
 create policy "poklopci_rezervacije_all" on public.poklopci_rezervacije for all using (true) with check (true);
 create policy "poklopci_prodaje_all" on public.poklopci_prodaje for all using (true) with check (true);
