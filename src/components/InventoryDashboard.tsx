@@ -63,7 +63,14 @@ function badgeStarosti(dana: number): string {
   return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
 }
 
-/** Prosečna ponderisana nabavna: (staro×cena + novo×cena) / ukupno kom */
+/** Ulazna cena artikla (trošak); ako nije uneta, fallback na osnovnu. */
+function ulaznaArtikla(art: { ulazna_cena?: number; osnovna_cena?: number }): number {
+  const ulazna = Number(art.ulazna_cena ?? 0)
+  if (ulazna > 0) return ulazna
+  return Number(art.osnovna_cena ?? 0)
+}
+
+/** Prosečna ponderisana ulazna: (staro×cena + novo×cena) / ukupno kom */
 function prosecanNabavna(
   staraKolicina: number,
   staraCena: number,
@@ -236,7 +243,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
         ulazna_cena: Number(a.ulazna_cena ?? 0),
       }))
       setArtikli(normalized)
-      const lager = normalized.reduce((sum: number, it: any) => sum + (it.osnovna_cena || 0) * (it.kolicina || 0), 0)
+      const lager = normalized.reduce((sum: number, it: any) => sum + ulaznaArtikla(it) * (it.kolicina || 0), 0)
       setNovacULageru(lager)
     } catch (err) {
       console.error('Unexpected error loading artikli:', err)
@@ -344,7 +351,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
   function otvoriPrijem(art?: any) {
     setPrijemArtikal(art || null)
     setPrijemKolicina('')
-    setPrijemCena(art ? String(art.ulazna_cena ?? art.osnovna_cena ?? '') : '')
+    setPrijemCena(art ? String(ulaznaArtikla(art) || '') : '')
     setPrijemDobavljac('')
     setPrijemDatum(new Date().toISOString().slice(0, 10))
     setPrijemNapomena('')
@@ -361,14 +368,13 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     setLoading(true)
     try {
       const staraKolicina = Number(prijemArtikal.kolicina ?? 0)
-      const staraCena = Number(prijemArtikal.osnovna_cena ?? prijemArtikal.ulazna_cena ?? 0)
+      const staraCena = ulaznaArtikla(prijemArtikal)
       const novaKolicina = staraKolicina + kol
       const artikalUpdate: Record<string, unknown> = { kolicina: novaKolicina }
       let novaProsecna = staraCena
       if (prijemAzurirajCenu) {
         novaProsecna = prosecanNabavna(staraKolicina, staraCena, kol, cena)
         artikalUpdate.ulazna_cena = novaProsecna
-        artikalUpdate.osnovna_cena = novaProsecna
       }
       const datumIso = prijemDatum ? new Date(prijemDatum + 'T12:00:00').toISOString() : new Date().toISOString()
       const [ins, upd] = await Promise.all([
@@ -392,9 +398,9 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
       }
       if (upd.error) { toast.error('Greška pri ažuriranju lagera.'); setLoading(false); return }
       const cenaPoruka = prijemAzurirajCenu && staraKolicina > 0
-        ? ` · prosečna nabavna: ${staraCena.toFixed(2)} → ${novaProsecna.toFixed(2)} €`
+        ? ` · prosečna ulazna: ${staraCena.toFixed(2)} → ${novaProsecna.toFixed(2)} €`
         : prijemAzurirajCenu
-          ? ` · nabavna: ${novaProsecna.toFixed(2)} €`
+          ? ` · ulazna: ${novaProsecna.toFixed(2)} €`
           : ''
       toast.success(`Prijem: +${kol} kom → ${novaKolicina} na stanju${cenaPoruka}`)
       setShowPrijem(false)
@@ -2007,7 +2013,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                 <select required value={prijemArtikal?.id || ''} onChange={e => {
                   const art = artikli.find(a => a.id === e.target.value)
                   setPrijemArtikal(art || null)
-                  if (art) setPrijemCena(String(art.ulazna_cena ?? art.osnovna_cena ?? ''))
+                  if (art) setPrijemCena(String(ulaznaArtikla(art) || ''))
                 }} className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base">
                   <option value="">— Izaberi artikal —</option>
                   {artikli.map(a => <option key={a.id} value={a.id}>{a.naziv} ({a.kolicina} kom)</option>)}
@@ -2020,7 +2026,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                     className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" placeholder="+10" />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Cena ovog prijema €/kom</label>
+                  <label className="text-sm font-medium">Ulazna cena ovog prijema €/kom</label>
                   <input required type="number" step="0.01" min="0" value={prijemCena} onChange={e => setPrijemCena(e.target.value)}
                     className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" placeholder="npr. 8.00" />
                 </div>
@@ -2028,15 +2034,15 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" checked={prijemAzurirajCenu} onChange={e => setPrijemAzurirajCenu(e.target.checked)} className="w-4 h-4 mt-1" />
                 <span>
-                  Preračunaj <strong>prosečnu</strong> nabavnu cenu
+                  Preračunaj <strong>prosečnu ulaznu</strong> cenu
                   <span className="block text-xs text-gray-500 mt-0.5">
-                    (stara količina × stara cena + novi prijem) ÷ ukupno
+                    Samo ulazna — prodajna/nabavna (osnovna) ostaje nepromenjena
                   </span>
                 </span>
               </label>
               {prijemAzurirajCenu && prijemArtikal && Number(prijemKolicina) > 0 && prijemCena !== '' && (() => {
                 const stK = Number(prijemArtikal.kolicina ?? 0)
-                const stC = Number(prijemArtikal.osnovna_cena ?? prijemArtikal.ulazna_cena ?? 0)
+                const stC = ulaznaArtikla(prijemArtikal)
                 const dK = Math.floor(Number(prijemKolicina))
                 const dC = Number(prijemCena)
                 const pros = prosecanNabavna(stK, stC, dK, dC)
@@ -2270,7 +2276,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
               <div className="p-6">
                 {kategorije.map(kat => {
                   const artikliKat = artikli.filter(a => a.kategorija === kat)
-                  const vrednost = artikliKat.reduce((sum, a) => sum + (a.osnovna_cena || 0) * (a.kolicina || 0), 0)
+                  const vrednost = artikliKat.reduce((sum, a) => sum + ulaznaArtikla(a) * (a.kolicina || 0), 0)
                   if (vrednost === 0) return null
                   return (
                     <div key={kat} className="flex justify-between items-center py-3 border-b">
