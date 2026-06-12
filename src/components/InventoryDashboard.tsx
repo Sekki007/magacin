@@ -63,6 +63,19 @@ function badgeStarosti(dana: number): string {
   return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
 }
 
+/** Prosečna ponderisana nabavna: (staro×cena + novo×cena) / ukupno kom */
+function prosecanNabavna(
+  staraKolicina: number,
+  staraCena: number,
+  dolaziKolicina: number,
+  dolaziCena: number,
+): number {
+  const ukupno = staraKolicina + dolaziKolicina
+  if (ukupno <= 0) return dolaziCena
+  if (staraKolicina <= 0) return dolaziCena
+  return (staraKolicina * staraCena + dolaziKolicina * dolaziCena) / ukupno
+}
+
 const ulogaNaziv: Record<Uloga, string> = {
   admin: 'Admin',
   kolega: 'Kolega',
@@ -347,11 +360,15 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     if (kol <= 0 || cena < 0) { toast.error('Proveri količinu i cenu.'); return }
     setLoading(true)
     try {
-      const novaKolicina = Number(prijemArtikal.kolicina) + kol
+      const staraKolicina = Number(prijemArtikal.kolicina ?? 0)
+      const staraCena = Number(prijemArtikal.osnovna_cena ?? prijemArtikal.ulazna_cena ?? 0)
+      const novaKolicina = staraKolicina + kol
       const artikalUpdate: Record<string, unknown> = { kolicina: novaKolicina }
+      let novaProsecna = staraCena
       if (prijemAzurirajCenu) {
-        artikalUpdate.ulazna_cena = cena
-        artikalUpdate.osnovna_cena = cena
+        novaProsecna = prosecanNabavna(staraKolicina, staraCena, kol, cena)
+        artikalUpdate.ulazna_cena = novaProsecna
+        artikalUpdate.osnovna_cena = novaProsecna
       }
       const datumIso = prijemDatum ? new Date(prijemDatum + 'T12:00:00').toISOString() : new Date().toISOString()
       const [ins, upd] = await Promise.all([
@@ -374,7 +391,12 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
         return
       }
       if (upd.error) { toast.error('Greška pri ažuriranju lagera.'); setLoading(false); return }
-      toast.success(`Prijem: +${kol} × ${prijemArtikal.naziv}`)
+      const cenaPoruka = prijemAzurirajCenu && staraKolicina > 0
+        ? ` · prosečna nabavna: ${staraCena.toFixed(2)} → ${novaProsecna.toFixed(2)} €`
+        : prijemAzurirajCenu
+          ? ` · nabavna: ${novaProsecna.toFixed(2)} €`
+          : ''
+      toast.success(`Prijem: +${kol} kom → ${novaKolicina} na stanju${cenaPoruka}`)
       setShowPrijem(false)
       await Promise.all([ucitajArtikle(), ucitajPrijeme()])
     } catch {
@@ -1998,15 +2020,40 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                     className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" placeholder="+10" />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Nabavna €/kom</label>
+                  <label className="text-sm font-medium">Cena ovog prijema €/kom</label>
                   <input required type="number" step="0.01" min="0" value={prijemCena} onChange={e => setPrijemCena(e.target.value)}
-                    className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" />
+                    className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" placeholder="npr. 8.00" />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={prijemAzurirajCenu} onChange={e => setPrijemAzurirajCenu(e.target.checked)} className="w-4 h-4" />
-                Ažuriraj nabavnu/ulaznu cenu artikla
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" checked={prijemAzurirajCenu} onChange={e => setPrijemAzurirajCenu(e.target.checked)} className="w-4 h-4 mt-1" />
+                <span>
+                  Preračunaj <strong>prosečnu</strong> nabavnu cenu
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    (stara količina × stara cena + novi prijem) ÷ ukupno
+                  </span>
+                </span>
               </label>
+              {prijemAzurirajCenu && prijemArtikal && Number(prijemKolicina) > 0 && prijemCena !== '' && (() => {
+                const stK = Number(prijemArtikal.kolicina ?? 0)
+                const stC = Number(prijemArtikal.osnovna_cena ?? prijemArtikal.ulazna_cena ?? 0)
+                const dK = Math.floor(Number(prijemKolicina))
+                const dC = Number(prijemCena)
+                const pros = prosecanNabavna(stK, stC, dK, dC)
+                const uk = stK + dK
+                return (
+                  <div className="text-sm bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-lg px-3 py-2 space-y-1">
+                    <p>
+                      Pregled: <strong>{stK} × {stC.toFixed(2)} €</strong> + <strong>{dK} × {dC.toFixed(2)} €</strong>
+                      {' → '}
+                      <strong>{uk} kom × {pros.toFixed(2)} €</strong> prosečno
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Vrednost lagera posle prijema: {(uk * pros).toFixed(2)} €
+                    </p>
+                  </div>
+                )
+              })()}
               <input type="text" placeholder="Dobavljač" value={prijemDobavljac} onChange={e => setPrijemDobavljac(e.target.value)}
                 className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" />
               <input type="date" value={prijemDatum} onChange={e => setPrijemDatum(e.target.value)}
