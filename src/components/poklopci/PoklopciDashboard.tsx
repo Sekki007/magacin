@@ -2,6 +2,7 @@
 
 import { supabase } from '@/lib/supabase'
 import { DEFAULT_BOJE, DEFAULT_MODELI, nazivPoklopca } from '@/lib/poklopciKatalog'
+import { sveKombinacijePoklopaca } from '@/lib/poklopciModelBoje'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -708,6 +709,38 @@ export default function PoklopciDashboard() {
     await Promise.all([ucitajArtikle(), ucitajRezervacije(), ucitajKasu(), ucitajProdaje(), ucitajDugAvanse()])
   }
 
+  async function popuniSveKombinacije() {
+    const postojece = new Set(artikli.map(a => `${a.model}|||${a.boja}`))
+    const zaInsert = sveKombinacijePoklopaca()
+      .filter(k => !postojece.has(`${k.model}|||${k.boja}`))
+      .map(k => ({
+        naziv: nazivPoklopca(k.model, k.boja),
+        model: k.model,
+        boja: k.boja,
+        kolicina: 0,
+        nabavna_cena: 0,
+        prodajna_cena: 0,
+      }))
+    if (zaInsert.length === 0) {
+      toast.success('Sve kombinacije model+boja već postoje.')
+      return
+    }
+    if (!confirm(`Dodati ${zaInsert.length} poklopaca (0 kom, 0 €)? Postojeći se ne diraju.`)) return
+    setLoading(true)
+    const chunk = 50
+    for (let i = 0; i < zaInsert.length; i += chunk) {
+      const { error } = await supabase.from('poklopci_artikli').insert(zaInsert.slice(i, i + chunk))
+      if (error) {
+        setLoading(false)
+        toast.error(`Greška: ${error.message}`)
+        return
+      }
+    }
+    setLoading(false)
+    toast.success(`Dodato ${zaInsert.length} kombinacija. Unesi cene i količine ručno.`)
+    await ucitajArtikle()
+  }
+
   async function sacuvajPreimenovanje() {
     const staro = preimenujStaro.trim()
     const novo = preimenujNovo.trim()
@@ -785,10 +818,14 @@ export default function PoklopciDashboard() {
               Prodato: {ukupnoProdato.toFixed(2)} €
             </button>
             <button onClick={() => setShowResetKase(true)}
-              className="flex items-center gap-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-4 py-2 rounded-lg text-sm font-medium">
+              className="flex items-center gap-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium">
               Reset kase
             </button>
-            <button onClick={otvoriDodavanje} className="ml-auto flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg font-bold">
+            <button onClick={popuniSveKombinacije} disabled={loading}
+              className="flex items-center gap-2 bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+              Popuni sve modele/boje
+            </button>
+            <button onClick={otvoriDodavanje} className="sm:ml-auto flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 sm:px-5 py-2.5 rounded-lg font-bold w-full sm:w-auto justify-center">
               <PlusIcon className="w-5 h-5" /> Novi model
             </button>
           </div>
@@ -877,11 +914,11 @@ export default function PoklopciDashboard() {
                             </div>
                             <div className="flex items-center gap-4">
                               <span className={`text-lg font-bold ${a.kolicina <= 1 ? 'text-red-600' : 'text-slate-700 dark:text-slate-200'}`}>{a.kolicina} kom</span>
-                              <div className="flex gap-1">
-                                <button onClick={() => otvoriProdaju(a)} title="Prodaj" className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg"><ShoppingBagIcon className="w-5 h-5" /></button>
-                                <button onClick={() => otvoriRezervaciju(a)} title="Rezerviši" className="p-2 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg"><ClockIcon className="w-5 h-5" /></button>
-                                <button onClick={() => izmeniArtikal(a)} title="Izmeni" className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"><PencilSquareIcon className="w-5 h-5" /></button>
-                                <button onClick={() => obrisiArtikal(a.id)} title="Obriši" className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><TrashIcon className="w-5 h-5" /></button>
+                              <div className="flex gap-1 flex-wrap justify-end">
+                                <button onClick={() => otvoriProdaju(a)} title="Prodaj" className="p-3 min-w-[2.75rem] min-h-[2.75rem] text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg"><ShoppingBagIcon className="w-5 h-5" /></button>
+                                <button onClick={() => otvoriRezervaciju(a)} title="Rezerviši" className="p-3 min-w-[2.75rem] min-h-[2.75rem] text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg"><ClockIcon className="w-5 h-5" /></button>
+                                <button onClick={() => izmeniArtikal(a)} title="Izmeni" className="p-3 min-w-[2.75rem] min-h-[2.75rem] text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"><PencilSquareIcon className="w-5 h-5" /></button>
+                                <button onClick={() => obrisiArtikal(a.id)} title="Obriši" className="p-3 min-w-[2.75rem] min-h-[2.75rem] text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><TrashIcon className="w-5 h-5" /></button>
                               </div>
                             </div>
                           </div>
@@ -897,8 +934,8 @@ export default function PoklopciDashboard() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <form onSubmit={sacuvajArtikal} className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+        <div className="fixed inset-0 bg-black/50 modal-overlay flex items-end sm:items-center justify-center z-50">
+          <form onSubmit={sacuvajArtikal} className="modal-panel modal-panel-sheet bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-xl font-bold">
                 {editId ? 'Izmeni boju' : formModelZakljucan && izabraniModel ? `Dodaj boju — ${izabraniModel}` : 'Novi model i boja'}
@@ -1078,8 +1115,8 @@ export default function PoklopciDashboard() {
       )}
 
       {showDugovanja && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 modal-overlay flex items-end sm:items-center justify-center z-50">
+          <div className="modal-panel modal-panel-sheet bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl max-w-3xl w-full max-h-[92dvh] overflow-y-auto">
             <div className="sticky top-0 bg-white dark:bg-gray-800 border-b p-5 flex justify-between z-10">
               <div>
                 <h3 className="text-xl font-bold text-amber-700 flex items-center gap-2"><UserGroupIcon className="w-6 h-6" /> Dugovanja poklopci</h3>

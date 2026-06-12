@@ -23,6 +23,7 @@ import {
   UserGroupIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  ArchiveBoxArrowDownIcon,
 } from '@heroicons/react/24/outline'
 
 type Uloga = 'admin' | 'kolega' | 'serviser' | 'lager'
@@ -133,6 +134,17 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
   const [showRezervisaniModal, setShowRezervisaniModal] = useState(false)
   const [showVrednostPoKategorijama, setShowVrednostPoKategorijama] = useState(false)
   const [showInfoBar, setShowInfoBar] = useState(false)
+
+  const [showPrijem, setShowPrijem] = useState(false)
+  const [showPrijemiHistoria, setShowPrijemiHistoria] = useState(false)
+  const [prijemi, setPrijemi] = useState<any[]>([])
+  const [prijemArtikal, setPrijemArtikal] = useState<any | null>(null)
+  const [prijemKolicina, setPrijemKolicina] = useState('')
+  const [prijemCena, setPrijemCena] = useState('')
+  const [prijemDobavljac, setPrijemDobavljac] = useState('')
+  const [prijemDatum, setPrijemDatum] = useState(() => new Date().toISOString().slice(0, 10))
+  const [prijemNapomena, setPrijemNapomena] = useState('')
+  const [prijemAzurirajCenu, setPrijemAzurirajCenu] = useState(true)
 
   // Paginacija
   const [page, setPage] = useState(1)
@@ -297,9 +309,80 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     if (currentUser.uloga === 'admin') {
       ucitajRezervacije().catch(err => toast.error('Greška pri učitavanju rezervacija'))
       ucitajDugAvanse()
+      ucitajPrijeme()
       ucitajProfile()
     }
   }, [currentUser])
+
+  async function ucitajPrijeme() {
+    try {
+      const { data, error } = await supabase
+        .from('prijemi')
+        .select('*, artikli(naziv, kategorija)')
+        .order('datum', { ascending: false })
+        .limit(100)
+      if (error) { setPrijemi([]); return }
+      setPrijemi(data || [])
+    } catch {
+      setPrijemi([])
+    }
+  }
+
+  function otvoriPrijem(art?: any) {
+    setPrijemArtikal(art || null)
+    setPrijemKolicina('')
+    setPrijemCena(art ? String(art.ulazna_cena ?? art.osnovna_cena ?? '') : '')
+    setPrijemDobavljac('')
+    setPrijemDatum(new Date().toISOString().slice(0, 10))
+    setPrijemNapomena('')
+    setPrijemAzurirajCenu(true)
+    setShowPrijem(true)
+  }
+
+  async function sacuvajPrijem(e: React.FormEvent) {
+    e.preventDefault()
+    if (!prijemArtikal) { toast.error('Izaberi artikal.'); return }
+    const kol = Math.floor(Number(prijemKolicina))
+    const cena = Number(prijemCena)
+    if (kol <= 0 || cena < 0) { toast.error('Proveri količinu i cenu.'); return }
+    setLoading(true)
+    try {
+      const novaKolicina = Number(prijemArtikal.kolicina) + kol
+      const artikalUpdate: Record<string, unknown> = { kolicina: novaKolicina }
+      if (prijemAzurirajCenu) {
+        artikalUpdate.ulazna_cena = cena
+        artikalUpdate.osnovna_cena = cena
+      }
+      const datumIso = prijemDatum ? new Date(prijemDatum + 'T12:00:00').toISOString() : new Date().toISOString()
+      const [ins, upd] = await Promise.all([
+        supabase.from('prijemi').insert({
+          artikal_id: prijemArtikal.id,
+          kolicina: kol,
+          cena_po_komadu: cena,
+          dobavljac: prijemDobavljac.trim() || null,
+          napomena: prijemNapomena.trim() || null,
+          uneto_od: currentUser?.username,
+          datum: datumIso,
+        }),
+        supabase.from('artikli').update(artikalUpdate).eq('id', prijemArtikal.id),
+      ])
+      if (ins.error) {
+        toast.error(ins.error.message.includes('prijemi')
+          ? 'Pokreni magacin_prijem_upgrade.sql u Supabase.'
+          : 'Greška pri prijemu.')
+        setLoading(false)
+        return
+      }
+      if (upd.error) { toast.error('Greška pri ažuriranju lagera.'); setLoading(false); return }
+      toast.success(`Prijem: +${kol} × ${prijemArtikal.naziv}`)
+      setShowPrijem(false)
+      await Promise.all([ucitajArtikle(), ucitajPrijeme()])
+    } catch {
+      toast.error('Greška pri prijemu.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!currentUser || currentUser.uloga !== 'admin') return
@@ -334,6 +417,8 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
+      if (showPrijem) { setShowPrijem(false); return }
+      if (showPrijemiHistoria) { setShowPrijemiHistoria(false); return }
       if (showIzmenaStavke) {
         setShowIzmenaStavke(false)
         return
@@ -385,6 +470,8 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
+    showPrijem,
+    showPrijemiHistoria,
     showIzmenaStavke,
     showDelimicnoPlacanje,
     showPreimenujModal,
@@ -1066,8 +1153,8 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
           </div>
 
           {isAdmin && (
-            <div className="px-8 py-5 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex flex-wrap items-center justify-start gap-4">
+            <div className="px-4 sm:px-8 py-4 sm:py-5 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex flex-wrap items-center justify-start gap-2 sm:gap-4">
                 <Link href="/admin/prodaje" className="flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/50 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 px-4 py-2 rounded-lg">
                   <ChartBarIcon className="w-5 h-5" />
                   Pregled prodaja
@@ -1097,6 +1184,13 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                 <button onClick={() => setShowVrednostPoKategorijama(true)} className="flex items-center gap-2 bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/50 dark:hover:bg-teal-900/70 text-teal-700 dark:text-teal-200 px-4 py-2 rounded-lg">
                   <ChartBarIcon className="w-5 h-5" />
                   Vrednost po kategorijama
+                </button>
+                <button onClick={() => otvoriPrijem()} className="flex items-center gap-2 bg-cyan-100 hover:bg-cyan-200 dark:bg-cyan-900/50 dark:hover:bg-cyan-900/70 text-cyan-800 dark:text-cyan-200 px-4 py-2 rounded-lg">
+                  <ArchiveBoxArrowDownIcon className="w-5 h-5" />
+                  Prijem robe
+                </button>
+                <button onClick={() => setShowPrijemiHistoria(true)} className="flex items-center gap-2 bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 px-3 py-2 rounded-lg text-sm">
+                  Istorija prijema
                 </button>
                 <Link href="/poklopci" className="flex items-center gap-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 px-4 py-2 rounded-lg font-medium">
                   <DevicePhoneMobileIcon className="w-5 h-5" />
@@ -1284,6 +1378,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                       {isAdmin && (
                         <td className="p-4 text-center space-x-4">
                           <button onClick={() => otvoriProdaju(art)} title="Prodaj" aria-label="Prodaj" className="text-green-600 hover:text-green-800"><ShoppingBagIcon className="w-6 h-6 inline" /></button>
+                          <button onClick={() => otvoriPrijem(art)} title="Prijem" aria-label="Prijem robe" className="text-cyan-600 hover:text-cyan-800"><ArchiveBoxArrowDownIcon className="w-6 h-6 inline" /></button>
                           <button onClick={() => otvoriRezervaciju(art)} title="Rezerviši" aria-label="Rezerviši" className="text-orange-600 hover:text-orange-800"><ClockIcon className="w-6 h-6 inline" /></button>
                           <button onClick={() => izmeniArtikal(art)} title="Izmeni" aria-label="Izmeni artikal" className="text-blue-600 hover:text-blue-800"><PencilSquareIcon className="w-6 h-6 inline" /></button>
                           <button onClick={() => obrisiArtikal(art.id)} title="Obriši" aria-label="Obriši artikal" className="text-red-600 hover:text-red-800"><TrashIcon className="w-6 h-6 inline" /></button>
@@ -1338,11 +1433,14 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                     </div>
                   </div>
                   {isAdmin && (
-                    <div className="px-5 py-4 bg-gray-100 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-700 flex justify-center gap-8">
-                      <button onClick={() => otvoriProdaju(art)} title="Prodaj" aria-label="Prodaj" className="p-4 bg-green-100 dark:bg-green-900/50 rounded-xl hover:bg-green-200 dark:hover:bg-green-900/70 transition shadow-md">
+                    <div className="px-5 py-4 bg-gray-100 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-700 flex justify-center flex-wrap gap-4 sm:gap-8">
+                      <button onClick={() => otvoriProdaju(art)} title="Prodaj" aria-label="Prodaj" className="p-4 min-w-[3.5rem] min-h-[3.5rem] bg-green-100 dark:bg-green-900/50 rounded-xl hover:bg-green-200 dark:hover:bg-green-900/70 transition shadow-md">
                         <ShoppingBagIcon className="w-7 h-7 text-green-600 dark:text-green-400" />
                       </button>
-                      <button onClick={() => otvoriRezervaciju(art)} title="Rezerviši" aria-label="Rezerviši" className="p-4 bg-orange-100 dark:bg-orange-900/50 rounded-xl hover:bg-orange-200 dark:hover:bg-orange-900/70 transition shadow-md">
+                      <button onClick={() => otvoriPrijem(art)} title="Prijem" aria-label="Prijem robe" className="p-4 min-w-[3.5rem] min-h-[3.5rem] bg-cyan-100 dark:bg-cyan-900/50 rounded-xl hover:bg-cyan-200 dark:hover:bg-cyan-900/70 transition shadow-md">
+                        <ArchiveBoxArrowDownIcon className="w-7 h-7 text-cyan-600 dark:text-cyan-400" />
+                      </button>
+                      <button onClick={() => otvoriRezervaciju(art)} title="Rezerviši" aria-label="Rezerviši" className="p-4 min-w-[3.5rem] min-h-[3.5rem] bg-orange-100 dark:bg-orange-900/50 rounded-xl hover:bg-orange-200 dark:hover:bg-orange-900/70 transition shadow-md">
                         <ClockIcon className="w-7 h-7 text-orange-600 dark:text-orange-400" />
                       </button>
                       <button onClick={() => izmeniArtikal(art)} title="Izmeni" aria-label="Izmeni" className="p-4 bg-blue-100 dark:bg-blue-900/50 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-900/70 transition shadow-md">
@@ -1873,8 +1971,88 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
           </div>
         )}
 
+        {showPrijem && (
+          <div className="fixed inset-0 bg-black/60 modal-overlay flex items-end sm:items-center justify-center z-[60]">
+            <form onSubmit={sacuvajPrijem} className="modal-panel modal-panel-sheet bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-cyan-700 flex items-center gap-2">
+                  <ArchiveBoxArrowDownIcon className="w-7 h-7" /> Prijem robe
+                </h3>
+                <button type="button" onClick={() => setShowPrijem(false)}><XMarkIcon className="w-7 h-7" /></button>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-600 dark:text-gray-300">Artikal</label>
+                <select required value={prijemArtikal?.id || ''} onChange={e => {
+                  const art = artikli.find(a => a.id === e.target.value)
+                  setPrijemArtikal(art || null)
+                  if (art) setPrijemCena(String(art.ulazna_cena ?? art.osnovna_cena ?? ''))
+                }} className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base">
+                  <option value="">— Izaberi artikal —</option>
+                  {artikli.map(a => <option key={a.id} value={a.id}>{a.naziv} ({a.kolicina} kom)</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium">Količina</label>
+                  <input required type="number" min="1" value={prijemKolicina} onChange={e => setPrijemKolicina(e.target.value)}
+                    className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" placeholder="+10" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Nabavna €/kom</label>
+                  <input required type="number" step="0.01" min="0" value={prijemCena} onChange={e => setPrijemCena(e.target.value)}
+                    className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={prijemAzurirajCenu} onChange={e => setPrijemAzurirajCenu(e.target.checked)} className="w-4 h-4" />
+                Ažuriraj nabavnu/ulaznu cenu artikla
+              </label>
+              <input type="text" placeholder="Dobavljač" value={prijemDobavljac} onChange={e => setPrijemDobavljac(e.target.value)}
+                className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" />
+              <input type="date" value={prijemDatum} onChange={e => setPrijemDatum(e.target.value)}
+                className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" />
+              <textarea rows={2} placeholder="Napomena" value={prijemNapomena} onChange={e => setPrijemNapomena(e.target.value)}
+                className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700 text-base" />
+              <button type="submit" disabled={loading} className="w-full py-3.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl font-bold text-lg disabled:opacity-60">
+                {loading ? 'Evidentiram...' : 'Evidentiraj prijem'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {showPrijemiHistoria && (
+          <div className="fixed inset-0 bg-black/60 modal-overlay flex items-end sm:items-center justify-center z-[60]">
+            <div className="modal-panel modal-panel-sheet bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="p-5 border-b flex justify-between items-center shrink-0">
+                <h3 className="text-xl font-bold text-cyan-700">Istorija prijema</h3>
+                <button onClick={() => setShowPrijemiHistoria(false)}><XMarkIcon className="w-7 h-7" /></button>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1 space-y-2">
+                {prijemi.length === 0 ? (
+                  <p className="text-center py-8 text-gray-500">Nema evidentiranih prijema.</p>
+                ) : prijemi.map(p => (
+                  <div key={p.id} className="border rounded-lg p-3 flex flex-wrap justify-between gap-2">
+                    <div>
+                      <p className="font-medium">{p.artikli?.naziv || 'Artikal'}</p>
+                      <p className="text-sm text-gray-500">
+                        {new Date(p.datum).toLocaleDateString('sr-RS')}
+                        {p.dobavljac ? ` · ${p.dobavljac}` : ''}
+                        {p.uneto_od ? ` · ${p.uneto_od}` : ''}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-cyan-700">+{p.kolicina} kom</p>
+                      <p className="text-sm">{Number(p.cena_po_komadu).toFixed(2)} €/kom</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {showDelimicnoPlacanje && osobaDetalj && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="fixed inset-0 bg-black/60 modal-overlay flex items-end sm:items-center justify-center z-[60] p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-xl font-bold text-blue-600">Delimično plaćanje</h3>
