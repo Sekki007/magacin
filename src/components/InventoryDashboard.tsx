@@ -32,8 +32,12 @@ type OsobaDugovanje = {
   kome: string
   stavke: any[]
   ukupno: number
+  avans: number
+  preostalo: number
   dana: number
 }
+
+type DugAvans = { kome: string; iznos: number }
 
 function prikaziNapomenu(napomena: string | null): string {
   if (!napomena) return ''
@@ -110,6 +114,15 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
   const [showPreimenujModal, setShowPreimenujModal] = useState(false)
   const [preimenujStaroIme, setPreimenujStaroIme] = useState('')
   const [preimenujNovoIme, setPreimenujNovoIme] = useState('')
+
+  const [dugAvansi, setDugAvansi] = useState<DugAvans[]>([])
+  const [showDelimicnoPlacanje, setShowDelimicnoPlacanje] = useState(false)
+  const [delimicnoIznos, setDelimicnoIznos] = useState('')
+  const [delimicnoNapomena, setDelimicnoNapomena] = useState('')
+  const [showIzmenaStavke, setShowIzmenaStavke] = useState(false)
+  const [izmenaStavkaRez, setIzmenaStavkaRez] = useState<any | null>(null)
+  const [izmenaKolicina, setIzmenaKolicina] = useState(1)
+  const [izmenaCena, setIzmenaCena] = useState(0)
 
   // Reset kase
   const [showResetConfirm, setShowResetConfirm] = useState(false)
@@ -239,11 +252,24 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     }
   }
 
+  async function ucitajDugAvanse() {
+    try {
+      const { data, error } = await supabase.from('dugovanja_avans').select('kome, iznos')
+      if (error) {
+        setDugAvansi([])
+        return
+      }
+      setDugAvansi((data || []).map(r => ({ kome: r.kome, iznos: Number(r.iznos ?? 0) })))
+    } catch {
+      setDugAvansi([])
+    }
+  }
+
   async function ucitajRezervacije() {
     try {
       const { data, error } = await supabase
         .from('rezervacije')
-        .select('*, artikli(naziv, osnovna_cena, cena_kolega, cena_serviser)')
+        .select('*, artikli(naziv, osnovna_cena, cena_kolega, cena_serviser, kolicina)')
         .eq('razduzeno', false)
         .order('datum_rezervacije', { ascending: false })
       if (error) {
@@ -270,6 +296,7 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     ucitajKasu().catch(err => toast.error('Greška pri učitavanju kase'))
     if (currentUser.uloga === 'admin') {
       ucitajRezervacije().catch(err => toast.error('Greška pri učitavanju rezervacija'))
+      ucitajDugAvanse()
       ucitajProfile()
     }
   }, [currentUser])
@@ -307,6 +334,14 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
+      if (showIzmenaStavke) {
+        setShowIzmenaStavke(false)
+        return
+      }
+      if (showDelimicnoPlacanje) {
+        setShowDelimicnoPlacanje(false)
+        return
+      }
       if (showPreimenujModal) {
         setShowPreimenujModal(false)
         return
@@ -350,6 +385,8 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
+    showIzmenaStavke,
+    showDelimicnoPlacanje,
     showPreimenujModal,
     showResetConfirm,
     showVrednostPoKategorijama,
@@ -470,7 +507,20 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
       }
 
       const finalnoIme = cilj ? cilj.kome : novo
+      const avansStaro = avansZaOsobu(staro)
+      if (avansStaro > 0) {
+        const avansCilj = cilj ? avansZaOsobu(cilj.kome) : 0
+        await supabase.from('dugovanja_avans').delete().eq('kome', staro)
+        if (cilj) {
+          const novi = avansStaro + avansCilj
+          if (novi > 0) await supabase.from('dugovanja_avans').upsert({ kome: finalnoIme, iznos: novi })
+        } else {
+          await supabase.from('dugovanja_avans').upsert({ kome: finalnoIme, iznos: avansStaro })
+        }
+        await supabase.from('dugovanja_uplate').update({ kome: finalnoIme }).eq('kome', staro)
+      }
       await ucitajRezervacije()
+      await ucitajDugAvanse()
       if (otvorenaOsoba === staro) setOtvorenaOsoba(finalnoIme)
       setShowPreimenujModal(false)
       toast.success(cilj ? `Spojeno sa "${finalnoIme}"` : `Ime izmenjeno u "${finalnoIme}"`)
@@ -490,9 +540,113 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     })
   }
 
+  function avansZaOsobu(kome: string): number {
+    return Number(dugAvansi.find(a => a.kome === kome)?.iznos ?? 0)
+  }
+
   function izracunajCenuStavke(rez: any): number {
+    if (rez.cena_po_komadu != null && rez.cena_po_komadu !== '') {
+      return Number(rez.cena_po_komadu)
+    }
     const artikal = rez.artikli || artikli.find(a => a.id === rez.artikal_id)
     return Number(artikal?.osnovna_cena ?? 0)
+  }
+
+  function otvoriIzmenuStavke(rez: any) {
+    setIzmenaStavkaRez(rez)
+    setIzmenaKolicina(rez.kolicina)
+    setIzmenaCena(izracunajCenuStavke(rez))
+    setShowIzmenaStavke(true)
+  }
+
+  async function sacuvajIzmenuStavke() {
+    if (!izmenaStavkaRez) return
+    const novaKol = Math.floor(Number(izmenaKolicina))
+    const novaCena = Number(izmenaCena)
+    if (novaKol <= 0 || novaCena <= 0) {
+      toast.error('Količina i cena moraju biti veći od 0.')
+      return
+    }
+    setLoading(true)
+    try {
+      const rez = izmenaStavkaRez
+      const diff = novaKol - rez.kolicina
+      const art = artikli.find(a => a.id === rez.artikal_id)
+      if (diff > 0) {
+        const naStanju = Number(art?.kolicina ?? 0)
+        if (naStanju < diff) {
+          toast.error(`Nema dovoljno na stanju (slobodno ${naStanju} kom).`)
+          setLoading(false)
+          return
+        }
+        const { error } = await supabase.from('artikli').update({ kolicina: naStanju - diff }).eq('id', rez.artikal_id)
+        if (error) { toast.error('Greška pri skidanju sa lagera.'); setLoading(false); return }
+      } else if (diff < 0) {
+        const { error } = await supabase.from('artikli').update({ kolicina: Number(art?.kolicina ?? 0) + (-diff) }).eq('id', rez.artikal_id)
+        if (error) { toast.error('Greška pri vraćanju na lager.'); setLoading(false); return }
+      }
+      const { error } = await supabase.from('rezervacije').update({
+        kolicina: novaKol,
+        cena_po_komadu: novaCena,
+      }).eq('id', rez.id)
+      if (error) {
+        toast.error(error.message.includes('cena_po_komadu')
+          ? 'Pokreni magacin_dugovanja_upgrade.sql u Supabase.'
+          : 'Greška pri čuvanju stavke.')
+        setLoading(false)
+        return
+      }
+      setShowIzmenaStavke(false)
+      toast.success('Stavka izmenjena.')
+      await Promise.all([ucitajRezervacije(), ucitajArtikle()])
+    } catch {
+      toast.error('Greška pri izmeni stavke.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function evidentirajDelimicnoPlacanje() {
+    if (!otvorenaOsoba || !osobaDetalj) return
+    const iznos = Number(delimicnoIznos)
+    if (!iznos || iznos <= 0) {
+      toast.error('Unesi iznos uplate.')
+      return
+    }
+    if (iznos > osobaDetalj.preostalo + 0.005) {
+      toast.error(`Maksimum je ${osobaDetalj.preostalo.toFixed(2)} € (preostali dug).`)
+      return
+    }
+    setLoading(true)
+    try {
+      const noviAvans = avansZaOsobu(otvorenaOsoba) + iznos
+      const [avRes, uplRes, kasRes] = await Promise.all([
+        supabase.from('dugovanja_avans').upsert({ kome: otvorenaOsoba, iznos: noviAvans }),
+        supabase.from('dugovanja_uplate').insert({
+          kome: otvorenaOsoba,
+          iznos,
+          napomena: delimicnoNapomena.trim() || null,
+          uneto_od: currentUser?.username,
+        }),
+        supabase.from('kasa').update({ stanje_zarada: stanjeKase + iznos }).eq('id', 1),
+      ])
+      if (avRes.error || uplRes.error || kasRes.error) {
+        toast.error('Greška — pokreni magacin_dugovanja_upgrade.sql u Supabase.')
+        setLoading(false)
+        return
+      }
+      setStanjeKase(prev => prev + iznos)
+      setShowDelimicnoPlacanje(false)
+      setDelimicnoIznos('')
+      setDelimicnoNapomena('')
+      await ucitajDugAvanse()
+      await ucitajKasu()
+      toast.success(`Uplaćeno ${iznos.toFixed(2)} €. Preostalo: ${(osobaDetalj.preostalo - iznos).toFixed(2)} €`)
+    } catch {
+      toast.error('Greška pri delimičnom plaćanju.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function sacuvajRezervaciju() {
@@ -538,30 +692,30 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     setLoading(true)
     try {
       let trenutnaKasa = stanjeKase
+      const kome = stavke[0]?.kome
+      const stavkeTotal = stavke.reduce((s, r) => s + izracunajCenuStavke(r) * r.kolicina, 0)
+      const avans = placeno && kome ? avansZaOsobu(kome) : 0
+      const saAvansa = Math.min(avans, stavkeTotal)
+      const naKasu = stavkeTotal - saAvansa
+
       for (const rez of stavke) {
-        const artikal = rez.artikli || artikli.find(a => a.id === rez.artikal_id)
-        const cena = Number(artikal?.osnovna_cena ?? 0)
+        const cena = izracunajCenuStavke(rez)
         const zarada = cena * rez.kolicina
-        const naziv = rez.artikli?.naziv || artikal?.naziv || 'artikal'
 
         if (placeno) {
-          const [kasaRes, prodajaRes] = await Promise.all([
-            supabase.from('kasa').update({ stanje_zarada: trenutnaKasa + zarada }).eq('id', 1),
-            supabase.from('prodaje').insert({
-              artikal_id: rez.artikal_id,
-              kolicina_prodato: rez.kolicina,
-              cena_po_komadu: cena,
-              ukupna_zarada: zarada,
-              prodavac_username: currentUser?.username,
-              uloga_prodavac: currentUser?.uloga,
-            }),
-          ])
-          if ((kasaRes as any).error || (prodajaRes as any).error) {
+          const prodajaRes = await supabase.from('prodaje').insert({
+            artikal_id: rez.artikal_id,
+            kolicina_prodato: rez.kolicina,
+            cena_po_komadu: cena,
+            ukupna_zarada: zarada,
+            prodavac_username: currentUser?.username,
+            uloga_prodavac: currentUser?.uloga,
+          })
+          if ((prodajaRes as any).error) {
             toast.error('Greška pri razduženju (plaćeno).')
             setLoading(false)
             return
           }
-          trenutnaKasa += zarada
         } else {
           const art = artikli.find(a => a.id === rez.artikal_id)
           if (art) {
@@ -582,14 +736,38 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
         }
       }
 
+      if (placeno) {
+        if (naKasu > 0) {
+          const kasaRes = await supabase.from('kasa').update({ stanje_zarada: trenutnaKasa + naKasu }).eq('id', 1)
+          if ((kasaRes as any).error) {
+            toast.error('Greška pri ažuriranju kase.')
+            setLoading(false)
+            return
+          }
+          trenutnaKasa += naKasu
+        }
+        if (saAvansa > 0 && kome) {
+          const noviAvans = avans - saAvansa
+          if (noviAvans <= 0.005) {
+            await supabase.from('dugovanja_avans').delete().eq('kome', kome)
+          } else {
+            await supabase.from('dugovanja_avans').upsert({ kome, iznos: noviAvans })
+          }
+        }
+      }
+
       setStanjeKase(trenutnaKasa)
       await ucitajRezervacije()
       await ucitajArtikle()
       await ucitajKasu()
+      await ucitajDugAvanse()
       setIzabraneStavke(new Set())
 
       if (placeno) {
-        toast.success(`Plaćeno ${stavke.length} stavki — ukupno ${stavke.reduce((s, r) => s + izracunajCenuStavke(r) * r.kolicina, 0).toFixed(2)} €`)
+        const poruka = saAvansa > 0
+          ? `Plaćeno ${stavke.length} stavki — ${naKasu.toFixed(2)} € na kasu (${saAvansa.toFixed(2)} € iz avansa)`
+          : `Plaćeno ${stavke.length} stavki — ukupno ${stavkeTotal.toFixed(2)} €`
+        toast.success(poruka)
       } else {
         toast.success(`Vraćeno na lager: ${stavke.length} stavki`)
       }
@@ -790,13 +968,15 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
     return Array.from(map.entries())
       .map(([kome, stavke]) => {
         const ukupno = stavke.reduce((sum, rez) => sum + izracunajCenuStavke(rez) * rez.kolicina, 0)
+        const avans = avansZaOsobu(kome)
+        const preostalo = Math.max(0, ukupno - avans)
         const dana = Math.max(...stavke.map(s => danaOd(s.datum_rezervacije)))
-        return { kome, stavke, ukupno, dana }
+        return { kome, stavke, ukupno, avans, preostalo, dana }
       })
-      .sort((a, b) => b.dana - a.dana || b.ukupno - a.ukupno)
+      .sort((a, b) => b.dana - a.dana || b.preostalo - a.preostalo)
   })()
 
-  const ukupnoDugovanja = dugovanjaPoOsobi.reduce((sum, o) => sum + o.ukupno, 0)
+  const ukupnoDugovanja = dugovanjaPoOsobi.reduce((sum, o) => sum + o.preostalo, 0)
   const brojOsobaDugovanja = dugovanjaPoOsobi.length
   const osobaDetalj = otvorenaOsoba ? dugovanjaPoOsobi.find(o => o.kome === otvorenaOsoba) : null
 
@@ -1526,7 +1706,10 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                           </button>
                           <div className="flex items-center gap-3 shrink-0 ml-3">
                             <div className="text-right">
-                              <p className="text-2xl font-extrabold text-amber-600">{osoba.ukupno.toFixed(2)} €</p>
+                              <p className="text-2xl font-extrabold text-amber-600">{osoba.preostalo.toFixed(2)} €</p>
+                              {osoba.avans > 0 && (
+                                <p className="text-xs text-green-600">uplaćeno {osoba.avans.toFixed(2)} / {osoba.ukupno.toFixed(2)} €</p>
+                              )}
                               <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${badgeStarosti(osoba.dana)}`}>
                                 {osoba.dana === 0 ? 'danas' : `${osoba.dana} d`}
                               </span>
@@ -1580,19 +1763,32 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                           Izmeni / spoji ime
                         </button>
                         <div className="text-right">
-                          <p className="text-sm text-gray-500">Ukupno dugovanje</p>
-                          <p className="text-3xl font-extrabold text-amber-600">{osobaDetalj.ukupno.toFixed(2)} €</p>
+                          <p className="text-sm text-gray-500">Preostalo za naplatu</p>
+                          <p className="text-3xl font-extrabold text-amber-600">{osobaDetalj.preostalo.toFixed(2)} €</p>
+                          {osobaDetalj.avans > 0 && (
+                            <p className="text-sm text-green-600 mt-1">
+                              Stavke: {osobaDetalj.ukupno.toFixed(2)} € · Uplaćeno: {osobaDetalj.avans.toFixed(2)} €
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap gap-2 mb-4">
                       <button
+                        type="button"
+                        onClick={() => { setDelimicnoIznos(''); setDelimicnoNapomena(''); setShowDelimicnoPlacanje(true) }}
+                        disabled={loading || osobaDetalj.preostalo <= 0}
+                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-60"
+                      >
+                        Delimično plaćanje
+                      </button>
+                      <button
                         onClick={() => razduziStavke(osobaDetalj.stavke, true)}
                         disabled={loading}
                         className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-60"
                       >
-                        Plati sve
+                        Plati sve ({osobaDetalj.preostalo.toFixed(2)} €)
                       </button>
                       <button
                         onClick={() => razduziStavke(osobaDetalj.stavke.filter(s => izabraneStavke.has(s.id)), true)}
@@ -1638,6 +1834,9 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                               <p className="text-xs text-gray-400 mt-1">{new Date(rez.datum_rezervacije).toLocaleString('sr-RS')}</p>
                             </div>
                             <div className="flex flex-col gap-2">
+                              <button type="button" onClick={() => otvoriIzmenuStavke(rez)} disabled={loading} className="px-4 py-2 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-lg text-sm disabled:opacity-60 flex items-center justify-center gap-1">
+                                <PencilSquareIcon className="w-4 h-4" /> Izmeni
+                              </button>
                               <button onClick={() => razduziRezervaciju(rez, true)} disabled={loading} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm disabled:opacity-60">Plaćeno</button>
                               <button onClick={() => razduziRezervaciju(rez, false)} disabled={loading} className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm disabled:opacity-60">Vrati</button>
                             </div>
@@ -1669,6 +1868,88 @@ export default function InventoryDashboard({ initialEditId }: { initialEditId?: 
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showDelimicnoPlacanje && osobaDetalj && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-blue-600">Delimično plaćanje</h3>
+                <button onClick={() => setShowDelimicnoPlacanje(false)}><XMarkIcon className="w-7 h-7" /></button>
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                <strong>{osobaDetalj.kome}</strong> · preostalo: <strong>{osobaDetalj.preostalo.toFixed(2)} €</strong>
+              </p>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                max={osobaDetalj.preostalo}
+                placeholder="Iznos uplate €"
+                value={delimicnoIznos}
+                onChange={e => setDelimicnoIznos(e.target.value)}
+                className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700"
+                autoFocus
+              />
+              <textarea
+                rows={2}
+                placeholder="Napomena (opciono)"
+                value={delimicnoNapomena}
+                onChange={e => setDelimicnoNapomena(e.target.value)}
+                className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700"
+              />
+              <div className="flex gap-3">
+                <button onClick={() => setShowDelimicnoPlacanje(false)} className="flex-1 py-3 bg-gray-200 dark:bg-gray-600 rounded-lg">Otkaži</button>
+                <button onClick={evidentirajDelimicnoPlacanje} disabled={loading} className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {loading ? 'Čuvam...' : 'Evidentiraj uplatu'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showIzmenaStavke && izmenaStavkaRez && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-blue-600">Izmeni stavku</h3>
+                <button onClick={() => setShowIzmenaStavke(false)}><XMarkIcon className="w-7 h-7" /></button>
+              </div>
+              <p className="font-medium">{izmenaStavkaRez.artikli?.naziv || 'Artikal'}</p>
+              <p className="text-sm text-gray-500">Za: {izmenaStavkaRez.kome}</p>
+              <div>
+                <label className="text-sm text-gray-600">Količina (kom)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={izmenaKolicina}
+                  onChange={e => setIzmenaKolicina(Number(e.target.value))}
+                  className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700"
+                />
+                <p className="text-xs text-gray-400 mt-1">Povećanje skida sa lagera, smanjenje vraća na stanje.</p>
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">Cena po komadu (€)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={izmenaCena}
+                  onChange={e => setIzmenaCena(Number(e.target.value))}
+                  className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700"
+                />
+              </div>
+              <p className="text-sm bg-slate-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
+                Ukupno stavka: <strong>{(Number(izmenaKolicina) * Number(izmenaCena)).toFixed(2)} €</strong>
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowIzmenaStavke(false)} className="flex-1 py-3 bg-gray-200 dark:bg-gray-600 rounded-lg">Otkaži</button>
+                <button onClick={sacuvajIzmenuStavke} disabled={loading} className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {loading ? 'Čuvam...' : 'Sačuvaj'}
+                </button>
               </div>
             </div>
           </div>

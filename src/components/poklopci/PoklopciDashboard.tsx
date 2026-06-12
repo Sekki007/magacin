@@ -40,7 +40,8 @@ type Rezervacija = {
   napomena: string | null
   datum_rezervacije: string
   razduzeno: boolean
-  poklopci_artikli?: { naziv: string; model: string; boja: string; nabavna_cena: number; prodajna_cena: number }
+  cena_po_komadu?: number | null
+  poklopci_artikli?: { naziv: string; model: string; boja: string; nabavna_cena: number; prodajna_cena: number; kolicina?: number }
 }
 
 type Prodaja = {
@@ -57,7 +58,19 @@ type OsobaDugovanje = {
   kome: string
   stavke: Rezervacija[]
   ukupno: number
+  avans: number
+  preostalo: number
   dana: number
+}
+
+type DugAvans = { kome: string; iznos: number }
+
+type ModelGrupa = {
+  model: string
+  stavke: Artikal[]
+  ukupnoKom: number
+  ukupnoVrednost: number
+  imaMalo: boolean
 }
 
 function danaOd(datum: string): number {
@@ -124,6 +137,18 @@ export default function PoklopciDashboard() {
   const [resetCode, setResetCode] = useState('')
 
   const [showPregledProdaje, setShowPregledProdaje] = useState(false)
+  const [otvoreniModeli, setOtvoreniModeli] = useState<Set<string>>(new Set())
+  const [autoExpandGrupe, setAutoExpandGrupe] = useState(true)
+  const [formModelZakljucan, setFormModelZakljucan] = useState(false)
+
+  const [dugAvansi, setDugAvansi] = useState<DugAvans[]>([])
+  const [showDelimicnoPlacanje, setShowDelimicnoPlacanje] = useState(false)
+  const [delimicnoIznos, setDelimicnoIznos] = useState('')
+  const [delimicnoNapomena, setDelimicnoNapomena] = useState('')
+  const [showIzmenaStavke, setShowIzmenaStavke] = useState(false)
+  const [izmenaStavkaRez, setIzmenaStavkaRez] = useState<Rezervacija | null>(null)
+  const [izmenaKolicina, setIzmenaKolicina] = useState(1)
+  const [izmenaCena, setIzmenaCena] = useState(0)
 
   function spojiKatalog(dbLista: string[], podrazumevano: readonly string[]): string[] {
     return [...new Set([...podrazumevano, ...dbLista])]
@@ -182,7 +207,13 @@ export default function PoklopciDashboard() {
       return
     }
     setUsername(profile.username)
-    await Promise.all([ucitajKatalog(), ucitajArtikle(), ucitajRezervacije(), ucitajKasu(), ucitajProdaje()])
+    await Promise.all([ucitajKatalog(), ucitajArtikle(), ucitajRezervacije(), ucitajKasu(), ucitajProdaje(), ucitajDugAvanse()])
+  }
+
+  async function ucitajDugAvanse() {
+    const { data, error } = await supabase.from('poklopci_dugovanja_avans').select('kome, iznos')
+    if (error) { setDugAvansi([]); return }
+    setDugAvansi((data || []).map(r => ({ kome: r.kome, iznos: Number(r.iznos ?? 0) })))
   }
 
   async function ucitajArtikle() {
@@ -208,7 +239,7 @@ export default function PoklopciDashboard() {
   async function ucitajRezervacije() {
     const { data, error } = await supabase
       .from('poklopci_rezervacije')
-      .select('*, poklopci_artikli(naziv, model, boja, nabavna_cena, prodajna_cena)')
+      .select('*, poklopci_artikli(naziv, model, boja, nabavna_cena, prodajna_cena, kolicina)')
       .eq('razduzeno', false)
       .order('datum_rezervacije', { ascending: false })
     if (error) {
@@ -249,6 +280,8 @@ export default function PoklopciDashboard() {
       if (e.key !== 'Escape') return
       if (showNoviModel) { setShowNoviModel(false); return }
       if (showNovaBoja) { setShowNovaBoja(false); return }
+      if (showIzmenaStavke) { setShowIzmenaStavke(false); return }
+      if (showDelimicnoPlacanje) { setShowDelimicnoPlacanje(false); return }
       if (showPreimenuj) { setShowPreimenuj(false); return }
       if (showResetKase) { setShowResetKase(false); setResetCode(''); return }
       if (showPregledProdaje) { setShowPregledProdaje(false); return }
@@ -263,11 +296,84 @@ export default function PoklopciDashboard() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [showNoviModel, showNovaBoja, showPreimenuj, showResetKase, showPregledProdaje, showDugovanja, otvorenaOsoba, showForm, showProdaja, showRezervacija])
+  }, [showNoviModel, showNovaBoja, showIzmenaStavke, showDelimicnoPlacanje, showPreimenuj, showResetKase, showPregledProdaje, showDugovanja, otvorenaOsoba, showForm, showProdaja, showRezervacija])
+
+  function avansZaOsobu(kome: string): number {
+    return Number(dugAvansi.find(a => a.kome === kome)?.iznos ?? 0)
+  }
 
   function cenaStavke(rez: Rezervacija): number {
+    if (rez.cena_po_komadu != null) {
+      return Number(rez.cena_po_komadu)
+    }
     const a = rez.poklopci_artikli || artikli.find(x => x.id === rez.artikal_id)
     return Number(a?.nabavna_cena ?? 0)
+  }
+
+  function otvoriIzmenuStavke(rez: Rezervacija) {
+    setIzmenaStavkaRez(rez)
+    setIzmenaKolicina(rez.kolicina)
+    setIzmenaCena(cenaStavke(rez))
+    setShowIzmenaStavke(true)
+  }
+
+  async function sacuvajIzmenuStavke() {
+    if (!izmenaStavkaRez) return
+    const novaKol = Math.floor(Number(izmenaKolicina))
+    const novaCena = Number(izmenaCena)
+    if (novaKol <= 0 || novaCena <= 0) { toast.error('Količina i cena moraju biti > 0.'); return }
+    setLoading(true)
+    const rez = izmenaStavkaRez
+    const diff = novaKol - rez.kolicina
+    const art = artikli.find(x => x.id === rez.artikal_id)
+    if (diff > 0) {
+      const naStanju = Number(art?.kolicina ?? 0)
+      if (naStanju < diff) { toast.error(`Nema dovoljno na stanju (${naStanju} kom).`); setLoading(false); return }
+      const { error } = await supabase.from('poklopci_artikli').update({ kolicina: naStanju - diff }).eq('id', rez.artikal_id)
+      if (error) { toast.error('Greška pri skidanju sa stanja.'); setLoading(false); return }
+    } else if (diff < 0) {
+      const { error } = await supabase.from('poklopci_artikli').update({ kolicina: Number(art?.kolicina ?? 0) + (-diff) }).eq('id', rez.artikal_id)
+      if (error) { toast.error('Greška pri vraćanju na stanje.'); setLoading(false); return }
+    }
+    const { error } = await supabase.from('poklopci_rezervacije').update({ kolicina: novaKol, cena_po_komadu: novaCena }).eq('id', rez.id)
+    setLoading(false)
+    if (error) {
+      toast.error(error.message.includes('cena_po_komadu') ? 'Pokreni poklopci_dugovanja_upgrade.sql u Supabase.' : 'Greška pri čuvanju.')
+      return
+    }
+    setShowIzmenaStavke(false)
+    toast.success('Stavka izmenjena.')
+    await Promise.all([ucitajRezervacije(), ucitajArtikle()])
+  }
+
+  async function evidentirajDelimicnoPlacanje() {
+    if (!otvorenaOsoba || !osobaDetalj) return
+    const iznos = Number(delimicnoIznos)
+    if (!iznos || iznos <= 0) { toast.error('Unesi iznos.'); return }
+    if (iznos > osobaDetalj.preostalo + 0.005) {
+      toast.error(`Maksimum: ${osobaDetalj.preostalo.toFixed(2)} €`)
+      return
+    }
+    setLoading(true)
+    const noviAvans = avansZaOsobu(otvorenaOsoba) + iznos
+    const [avRes, uplRes, kasRes] = await Promise.all([
+      supabase.from('poklopci_dugovanja_avans').upsert({ kome: otvorenaOsoba, iznos: noviAvans }),
+      supabase.from('poklopci_dugovanja_uplate').insert({
+        kome: otvorenaOsoba, iznos, napomena: delimicnoNapomena.trim() || null, uneto_od: username,
+      }),
+      supabase.from('poklopci_kasa').update({ stanje_zarada: stanjeKase + iznos }).eq('id', 1),
+    ])
+    setLoading(false)
+    if (avRes.error || uplRes.error || kasRes.error) {
+      toast.error('Greška — pokreni poklopci_dugovanja_upgrade.sql u Supabase.')
+      return
+    }
+    setStanjeKase(prev => prev + iznos)
+    setShowDelimicnoPlacanje(false)
+    setDelimicnoIznos('')
+    setDelimicnoNapomena('')
+    await Promise.all([ucitajDugAvanse(), ucitajKasu()])
+    toast.success(`Uplaćeno ${iznos.toFixed(2)} €. Preostalo: ${(osobaDetalj.preostalo - iznos).toFixed(2)} €`)
   }
 
   function labelArtikla(a: { model?: string; boja?: string; naziv?: string }): string {
@@ -286,16 +392,22 @@ export default function PoklopciDashboard() {
       map.get(r.kome)!.push(r)
     }
     return Array.from(map.entries())
-      .map(([kome, stavke]) => ({
-        kome,
-        stavke,
-        ukupno: stavke.reduce((s, r) => s + cenaStavke(r) * r.kolicina, 0),
-        dana: Math.max(...stavke.map(x => danaOd(x.datum_rezervacije))),
-      }))
-      .sort((a, b) => b.dana - a.dana || b.ukupno - a.ukupno)
+      .map(([kome, stavke]) => {
+        const ukupno = stavke.reduce((s, r) => s + cenaStavke(r) * r.kolicina, 0)
+        const avans = avansZaOsobu(kome)
+        return {
+          kome,
+          stavke,
+          ukupno,
+          avans,
+          preostalo: Math.max(0, ukupno - avans),
+          dana: Math.max(...stavke.map(x => danaOd(x.datum_rezervacije))),
+        }
+      })
+      .sort((a, b) => b.dana - a.dana || b.preostalo - a.preostalo)
   })()
 
-  const ukupnoDugovanja = dugovanjaPoOsobi.reduce((s, o) => s + o.ukupno, 0)
+  const ukupnoDugovanja = dugovanjaPoOsobi.reduce((s, o) => s + o.preostalo, 0)
   const osobaDetalj = otvorenaOsoba ? dugovanjaPoOsobi.find(o => o.kome === otvorenaOsoba) : null
   const predloziZaRez = dugovanjaPoOsobi.map(o => ({ name: o.kome, count: o.stavke.length }))
 
@@ -305,6 +417,53 @@ export default function PoklopciDashboard() {
     if (!q) return true
     return a.model.toLowerCase().includes(q) || a.boja.toLowerCase().includes(q) || a.naziv.toLowerCase().includes(q)
   })
+
+  function redosledModela(m: string): number {
+    const i = modeli.indexOf(m)
+    return i >= 0 ? i : 9999
+  }
+
+  const grupePoModelu: ModelGrupa[] = (() => {
+    const map = new Map<string, Artikal[]>()
+    for (const a of filtrirani) {
+      if (!map.has(a.model)) map.set(a.model, [])
+      map.get(a.model)!.push(a)
+    }
+    return Array.from(map.entries())
+      .map(([model, stavke]) => {
+        const sortirane = [...stavke].sort((x, y) => x.boja.localeCompare(y.boja, 'sr'))
+        return {
+          model,
+          stavke: sortirane,
+          ukupnoKom: sortirane.reduce((s, a) => s + a.kolicina, 0),
+          ukupnoVrednost: sortirane.reduce((s, a) => s + a.nabavna_cena * a.kolicina, 0),
+          imaMalo: sortirane.some(a => a.kolicina <= 1),
+        }
+      })
+      .sort((a, b) => redosledModela(a.model) - redosledModela(b.model) || a.model.localeCompare(b.model, 'sr', { numeric: true }))
+  })()
+
+  const postojeceBojeZaModel = izabraniModel
+    ? artikli.filter(a => a.model === izabraniModel && a.id !== editId).map(a => a.boja)
+    : []
+
+  const dostupneBoje = boje.filter(b => !postojeceBojeZaModel.includes(b) || b === izabranaBoja)
+
+  function toggleModel(model: string) {
+    setAutoExpandGrupe(false)
+    setOtvoreniModeli(prev => {
+      const n = new Set(autoExpandGrupe ? grupePoModelu.map(g => g.model) : prev)
+      if (n.has(model)) n.delete(model)
+      else n.add(model)
+      return n
+    })
+  }
+
+  function jeOtvoren(model: string): boolean {
+    if (pretraga.trim() || filterModel) return true
+    if (autoExpandGrupe) return true
+    return otvoreniModeli.has(model)
+  }
 
   function resetForme() {
     setIzabraniModel(''); setIzabranaBoja(''); setKolicina(''); setNabavna(''); setProdajna('')
@@ -317,11 +476,22 @@ export default function PoklopciDashboard() {
 
   function otvoriDodavanje() {
     osigurajKatalog()
-    setEditId(null); resetForme(); setShowForm(true)
+    setEditId(null); resetForme(); setFormModelZakljucan(false); setShowForm(true)
+  }
+
+  function otvoriDodavanjeBoje(model: string) {
+    osigurajKatalog()
+    setEditId(null)
+    resetForme()
+    setIzabraniModel(model)
+    setFormModelZakljucan(true)
+    setOtvoreniModeli(prev => new Set(prev).add(model))
+    setShowForm(true)
   }
 
   function izmeniArtikal(a: Artikal) {
     osigurajKatalog()
+    setFormModelZakljucan(true)
     setEditId(a.id)
     setIzabraniModel(a.model)
     setIzabranaBoja(a.boja)
@@ -486,35 +656,56 @@ export default function PoklopciDashboard() {
     if (stavke.length === 0) return
     setLoading(true)
     let kasa = stanjeKase
+    const kome = stavke[0]?.kome
+    const stavkeTotal = stavke.reduce((s, r) => s + cenaStavke(r) * r.kolicina, 0)
+    const avans = placeno && kome ? avansZaOsobu(kome) : 0
+    const saAvansa = Math.min(avans, stavkeTotal)
+    const naKasu = stavkeTotal - saAvansa
+
     for (const rez of stavke) {
-      const art = rez.poklopci_artikli || artikli.find(x => x.id === rez.artikal_id)
-      const cena = Number(art?.nabavna_cena ?? 0)
+      const cena = cenaStavke(rez)
       const zarada = cena * rez.kolicina
       if (placeno) {
-        const [k, p] = await Promise.all([
-          supabase.from('poklopci_kasa').update({ stanje_zarada: kasa + zarada }).eq('id', 1),
-          supabase.from('poklopci_prodaje').insert({
-            artikal_id: rez.artikal_id,
-            kolicina_prodato: rez.kolicina,
-            cena_po_komadu: cena,
-            ukupna_zarada: zarada,
-            prodavac_username: username,
-          }),
-        ])
-        if (k.error || p.error) { setLoading(false); toast.error('Greška.'); return }
-        kasa += zarada
+        const { error: pErr } = await supabase.from('poklopci_prodaje').insert({
+          artikal_id: rez.artikal_id,
+          kolicina_prodato: rez.kolicina,
+          cena_po_komadu: cena,
+          ukupna_zarada: zarada,
+          prodavac_username: username,
+        })
+        if (pErr) { setLoading(false); toast.error('Greška.'); return }
       } else {
         const a = artikli.find(x => x.id === rez.artikal_id)
         if (a) await supabase.from('poklopci_artikli').update({ kolicina: a.kolicina + rez.kolicina }).eq('id', rez.artikal_id)
       }
       await supabase.from('poklopci_rezervacije').update({ razduzeno: true }).eq('id', rez.id)
     }
+
+    if (placeno) {
+      if (naKasu > 0) {
+        const { error: kErr } = await supabase.from('poklopci_kasa').update({ stanje_zarada: kasa + naKasu }).eq('id', 1)
+        if (kErr) { setLoading(false); toast.error('Greška pri kasi.'); return }
+        kasa += naKasu
+      }
+      if (saAvansa > 0 && kome) {
+        const noviAvans = avans - saAvansa
+        if (noviAvans <= 0.005) await supabase.from('poklopci_dugovanja_avans').delete().eq('kome', kome)
+        else await supabase.from('poklopci_dugovanja_avans').upsert({ kome, iznos: noviAvans })
+      }
+    }
+
     setStanjeKase(kasa)
     setLoading(false)
     setIzabraneStavke(new Set())
     if (otvorenaOsoba && osobaDetalj && stavke.length === osobaDetalj.stavke.length) setOtvorenaOsoba(null)
-    toast.success(placeno ? 'Plaćeno i razduženo.' : 'Vraćeno na stanje.')
-    await Promise.all([ucitajArtikle(), ucitajRezervacije(), ucitajKasu(), ucitajProdaje()])
+    if (placeno) {
+      toast.success(saAvansa > 0
+        ? `Plaćeno — ${naKasu.toFixed(2)} € na kasu (${saAvansa.toFixed(2)} € iz avansa)`
+        : `Plaćeno ${stavkeTotal.toFixed(2)} €`)
+    } else {
+      toast.success('Vraćeno na stanje.')
+    }
+    await Promise.all([ucitajArtikle(), ucitajRezervacije(), ucitajKasu(), ucitajProdaje(), ucitajDugAvanse()])
   }
 
   async function sacuvajPreimenovanje() {
@@ -524,11 +715,20 @@ export default function PoklopciDashboard() {
     const ids = rezervacije.filter(r => r.kome === staro).map(r => r.id)
     const cilj = dugovanjaPoOsobi.find(o => o.kome.toLowerCase() === novo.toLowerCase() && o.kome !== staro)
     if (!confirm(cilj ? `Spojiti "${staro}" sa "${cilj.kome}"?` : `Preimenovati u "${novo}"?`)) return
-    const { error } = await supabase.from('poklopci_rezervacije').update({ kome: cilj ? cilj.kome : novo }).in('id', ids)
+    const finalnoIme = cilj ? cilj.kome : novo
+    const avansStaro = avansZaOsobu(staro)
+    const { error } = await supabase.from('poklopci_rezervacije').update({ kome: finalnoIme }).in('id', ids)
     if (error) { toast.error('Greška.'); return }
+    if (avansStaro > 0) {
+      const avansCilj = cilj ? avansZaOsobu(cilj.kome) : 0
+      await supabase.from('poklopci_dugovanja_avans').delete().eq('kome', staro)
+      const novi = cilj ? avansStaro + avansCilj : avansStaro
+      if (novi > 0) await supabase.from('poklopci_dugovanja_avans').upsert({ kome: finalnoIme, iznos: novi })
+      await supabase.from('poklopci_dugovanja_uplate').update({ kome: finalnoIme }).eq('kome', staro)
+    }
     setShowPreimenuj(false)
-    if (otvorenaOsoba === staro) setOtvorenaOsoba(cilj ? cilj.kome : novo)
-    await ucitajRezervacije()
+    if (otvorenaOsoba === staro) setOtvorenaOsoba(finalnoIme)
+    await Promise.all([ucitajRezervacije(), ucitajDugAvanse()])
     toast.success('Ime izmenjeno.')
   }
 
@@ -589,7 +789,7 @@ export default function PoklopciDashboard() {
               Reset kase
             </button>
             <button onClick={otvoriDodavanje} className="ml-auto flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg font-bold">
-              <PlusIcon className="w-5 h-5" /> Dodaj poklopac
+              <PlusIcon className="w-5 h-5" /> Novi model
             </button>
           </div>
         </div>
@@ -637,35 +837,60 @@ export default function PoklopciDashboard() {
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow border border-slate-200 dark:border-gray-700 overflow-hidden">
-          {filtrirani.length === 0 ? (
-            <p className="p-10 text-center text-gray-500">Nema poklopaca. Dodaj prvi artikal.</p>
+          {grupePoModelu.length === 0 ? (
+            <p className="p-10 text-center text-gray-500">Nema poklopaca. Klikni „Novi model” da dodaš prvi telefon i boju.</p>
           ) : (
             <div className="divide-y dark:divide-gray-700">
-              {filtrirani.map(a => (
-                <div key={a.id} className={`p-4 flex flex-wrap items-center justify-between gap-3 ${a.kolicina <= 1 ? 'bg-red-50/50 dark:bg-red-900/10' : ''}`}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <DevicePhoneMobileIcon className="w-8 h-8 text-slate-500 shrink-0" />
-                    <div>
-                      <p className="font-bold text-lg">{a.model}</p>
-                      <p className="text-sm text-slate-500 flex items-center gap-1">
-                        <SwatchIcon className="w-4 h-4" /> Boja: {a.boja}
-                      </p>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">
-                        Nabavna: {a.nabavna_cena.toFixed(2)} € · Prodajna: {a.prodajna_cena.toFixed(2)} €
-                      </p>
+              {grupePoModelu.map(grupa => {
+                const otvoren = jeOtvoren(grupa.model)
+                return (
+                  <div key={grupa.model} className={grupa.imaMalo ? 'bg-amber-50/30 dark:bg-amber-900/5' : ''}>
+                    <div className="px-4 py-3 flex flex-wrap items-center gap-3 bg-slate-50 dark:bg-gray-700/40 border-b border-slate-100 dark:border-gray-700">
+                      <button type="button" onClick={() => toggleModel(grupa.model)}
+                        className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80">
+                        <ChevronDownIcon className={`w-5 h-5 text-slate-500 shrink-0 transition ${otvoren ? 'rotate-180' : ''}`} />
+                        <DevicePhoneMobileIcon className="w-7 h-7 text-slate-600 dark:text-slate-300 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="font-bold text-lg text-slate-800 dark:text-white">{grupa.model}</p>
+                          <p className="text-sm text-slate-500">
+                            {grupa.stavke.length} {grupa.stavke.length === 1 ? 'boja' : 'boje'} · {grupa.ukupnoKom} kom · {grupa.ukupnoVrednost.toFixed(2)} €
+                          </p>
+                        </div>
+                      </button>
+                      <button type="button" onClick={() => otvoriDodavanjeBoje(grupa.model)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shrink-0">
+                        <PlusIcon className="w-4 h-4" /> Dodaj boju
+                      </button>
                     </div>
+                    {otvoren && (
+                      <div className="divide-y dark:divide-gray-700/80">
+                        {grupa.stavke.map(a => (
+                          <div key={a.id} className={`pl-6 sm:pl-12 pr-4 py-3 flex flex-wrap items-center justify-between gap-3 ${a.kolicina <= 1 ? 'bg-red-50/60 dark:bg-red-900/10' : ''}`}>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <SwatchIcon className="w-5 h-5 text-slate-400 shrink-0" />
+                              <div>
+                                <p className="font-semibold text-slate-800 dark:text-slate-100">{a.boja}</p>
+                                <p className="text-sm text-slate-500">
+                                  Nabavna: {a.nabavna_cena.toFixed(2)} € · Prodajna: {a.prodajna_cena.toFixed(2)} €
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <span className={`text-lg font-bold ${a.kolicina <= 1 ? 'text-red-600' : 'text-slate-700 dark:text-slate-200'}`}>{a.kolicina} kom</span>
+                              <div className="flex gap-1">
+                                <button onClick={() => otvoriProdaju(a)} title="Prodaj" className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg"><ShoppingBagIcon className="w-5 h-5" /></button>
+                                <button onClick={() => otvoriRezervaciju(a)} title="Rezerviši" className="p-2 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg"><ClockIcon className="w-5 h-5" /></button>
+                                <button onClick={() => izmeniArtikal(a)} title="Izmeni" className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"><PencilSquareIcon className="w-5 h-5" /></button>
+                                <button onClick={() => obrisiArtikal(a.id)} title="Obriši" className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><TrashIcon className="w-5 h-5" /></button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className={`text-xl font-bold ${a.kolicina <= 1 ? 'text-red-600' : ''}`}>{a.kolicina} kom</span>
-                    <div className="flex gap-2">
-                      <button onClick={() => otvoriProdaju(a)} title="Prodaj" className="p-2 text-green-600 hover:bg-green-50 rounded-lg"><ShoppingBagIcon className="w-5 h-5" /></button>
-                      <button onClick={() => otvoriRezervaciju(a)} title="Rezerviši" className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg"><ClockIcon className="w-5 h-5" /></button>
-                      <button onClick={() => izmeniArtikal(a)} title="Izmeni" className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><PencilSquareIcon className="w-5 h-5" /></button>
-                      <button onClick={() => obrisiArtikal(a.id)} title="Obriši" className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><TrashIcon className="w-5 h-5" /></button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -675,38 +900,69 @@ export default function PoklopciDashboard() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <form onSubmit={sacuvajArtikal} className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
             <div className="flex justify-between items-center">
-              <h3 className="text-xl font-bold">{editId ? 'Izmeni' : 'Novi'} poklopac</h3>
+              <h3 className="text-xl font-bold">
+                {editId ? 'Izmeni boju' : formModelZakljucan && izabraniModel ? `Dodaj boju — ${izabraniModel}` : 'Novi model i boja'}
+              </h3>
               <button type="button" onClick={() => setShowForm(false)}><XMarkIcon className="w-6 h-6" /></button>
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-slate-600 dark:text-slate-300">Model telefona ({modeli.length} modela)</label>
-              <div className="flex gap-2 mt-1">
-                <select required value={izabraniModel} onChange={e => setIzabraniModel(e.target.value)}
-                  className="flex-1 px-4 py-3 border-2 border-slate-300 rounded-lg bg-white text-slate-900 dark:bg-gray-700 dark:text-white dark:border-gray-500 cursor-pointer">
-                  <option value="">— Klikni i izaberi model —</option>
-                  {modeli.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-                <button type="button" onClick={() => setShowNoviModel(true)} className="px-3 py-2 bg-slate-200 dark:bg-gray-600 rounded-lg text-sm whitespace-nowrap">+ Novi</button>
+            {formModelZakljucan && izabraniModel ? (
+              <div className="flex items-center gap-3 bg-slate-100 dark:bg-gray-700/60 rounded-xl px-4 py-3">
+                <DevicePhoneMobileIcon className="w-8 h-8 text-slate-500" />
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Model</p>
+                  <p className="font-bold text-lg">{izabraniModel}</p>
+                </div>
+                {!editId && (
+                  <button type="button" onClick={() => { setFormModelZakljucan(false); setIzabraniModel('') }}
+                    className="ml-auto text-sm text-blue-600 hover:underline">Promeni model</button>
+                )}
               </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-slate-600 dark:text-slate-300">Boja ({boje.length} boja)</label>
-              <div className="flex gap-2 mt-1">
-                <select required value={izabranaBoja} onChange={e => setIzabranaBoja(e.target.value)}
-                  className="flex-1 px-4 py-3 border-2 border-slate-300 rounded-lg bg-white text-slate-900 dark:bg-gray-700 dark:text-white dark:border-gray-500 cursor-pointer">
-                  <option value="">— Klikni i izaberi boju —</option>
-                  {boje.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-                <button type="button" onClick={() => setShowNovaBoja(true)} className="px-3 py-2 bg-slate-200 dark:bg-gray-600 rounded-lg text-sm whitespace-nowrap">+ Nova</button>
+            ) : (
+              <div>
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">1. Izaberi model telefona</label>
+                <div className="flex gap-2 mt-1">
+                  <select required value={izabraniModel} onChange={e => { setIzabraniModel(e.target.value); setIzabranaBoja('') }}
+                    className="flex-1 px-4 py-3 border-2 border-slate-300 rounded-lg bg-white text-slate-900 dark:bg-gray-700 dark:text-white dark:border-gray-500 cursor-pointer">
+                    <option value="">— Izaberi model —</option>
+                    {modeli.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setShowNoviModel(true)} className="px-3 py-2 bg-slate-200 dark:bg-gray-600 rounded-lg text-sm whitespace-nowrap">+ Novi</button>
+                </div>
               </div>
-            </div>
+            )}
 
-            {izabraniModel && izabranaBoja && (
-              <p className="text-sm text-slate-500 bg-slate-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                Pregled: <strong>{nazivPoklopca(izabraniModel, izabranaBoja)}</strong>
-              </p>
+            {izabraniModel && (
+              <div>
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                  {formModelZakljucan ? '2. Izaberi boju za ovaj model' : '2. Izaberi boju'}
+                </label>
+                {postojeceBojeZaModel.length > 0 && !editId && (
+                  <p className="text-xs text-slate-500 mt-1 mb-2">
+                    Već imaš: {postojeceBojeZaModel.join(', ')}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2 mt-2 mb-2 max-h-32 overflow-y-auto">
+                  {dostupneBoje.map(b => (
+                    <button key={b} type="button" onClick={() => setIzabranaBoja(b)}
+                      className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                        izabranaBoja === b
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-white dark:bg-gray-700 border-slate-300 dark:border-gray-600 hover:border-emerald-500'
+                      }`}>
+                      {b}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <select required value={izabranaBoja} onChange={e => setIzabranaBoja(e.target.value)}
+                    className="flex-1 px-4 py-3 border-2 border-slate-300 rounded-lg bg-white text-slate-900 dark:bg-gray-700 dark:text-white dark:border-gray-500 cursor-pointer">
+                    <option value="">— ili izaberi iz liste —</option>
+                    {dostupneBoje.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setShowNovaBoja(true)} className="px-3 py-2 bg-slate-200 dark:bg-gray-600 rounded-lg text-sm whitespace-nowrap">+ Nova</button>
+                </div>
+              </div>
             )}
 
             <input required type="number" min="0" placeholder="Količina" value={kolicina} onChange={e => setKolicina(e.target.value)} className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700" />
@@ -839,7 +1095,10 @@ export default function PoklopciDashboard() {
                       <div key={o.kome} className="flex items-center justify-between bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4">
                         <button onClick={() => { setOtvorenaOsoba(o.kome); setIzabraneStavke(new Set()) }} className="flex-1 text-left font-bold">{o.kome}</button>
                         <span className={`text-xs px-2 py-0.5 rounded-full mr-2 ${badgeStarosti(o.dana)}`}>{o.dana}d</span>
-                        <span className="font-bold text-amber-700 mr-3">{o.ukupno.toFixed(2)} €</span>
+                        <div className="text-right mr-3">
+                          <span className="font-bold text-amber-700">{o.preostalo.toFixed(2)} €</span>
+                          {o.avans > 0 && <p className="text-xs text-green-600">uplaćeno {o.avans.toFixed(2)} / {o.ukupno.toFixed(2)} €</p>}
+                        </div>
                         <button onClick={() => { setPreimenujStaro(o.kome); setPreimenujNovo(o.kome); setShowPreimenuj(true) }} className="p-2 text-blue-600"><PencilSquareIcon className="w-5 h-5" /></button>
                         <button onClick={() => { setOtvorenaOsoba(o.kome); setIzabraneStavke(new Set()) }}><ChevronRightIcon className="w-5 h-5" /></button>
                       </div>
@@ -848,24 +1107,94 @@ export default function PoklopciDashboard() {
               ) : osobaDetalj && (
                 <div>
                   <button onClick={() => setOtvorenaOsoba(null)} className="text-sm text-amber-700 mb-3">← Nazad</button>
-                  <h4 className="text-lg font-bold mb-3">{osobaDetalj.kome} — {osobaDetalj.ukupno.toFixed(2)} €</h4>
+                  <div className="mb-4">
+                    <h4 className="text-lg font-bold">{osobaDetalj.kome}</h4>
+                    <p className="text-2xl font-extrabold text-amber-700">{osobaDetalj.preostalo.toFixed(2)} € preostalo</p>
+                    {osobaDetalj.avans > 0 && (
+                      <p className="text-sm text-green-600">Stavke: {osobaDetalj.ukupno.toFixed(2)} € · Uplaćeno: {osobaDetalj.avans.toFixed(2)} €</p>
+                    )}
+                  </div>
                   <div className="flex gap-2 mb-4 flex-wrap">
-                    <button onClick={() => razduziStavke(osobaDetalj.stavke, true)} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm">Plati sve</button>
+                    <button type="button" onClick={() => { setDelimicnoIznos(''); setDelimicnoNapomena(''); setShowDelimicnoPlacanje(true) }}
+                      disabled={loading || osobaDetalj.preostalo <= 0}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50">Delimično plaćanje</button>
+                    <button onClick={() => razduziStavke(osobaDetalj.stavke, true)} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm">
+                      Plati sve ({osobaDetalj.preostalo.toFixed(2)} €)
+                    </button>
                     <button onClick={() => razduziStavke(osobaDetalj.stavke.filter(s => izabraneStavke.has(s.id)), true)} disabled={izabraneStavke.size === 0} className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm disabled:opacity-50">Plati izabrano</button>
                   </div>
                   {osobaDetalj.stavke.map(rez => (
-                    <div key={rez.id} className="border rounded-lg p-3 mb-2 flex gap-3 items-start">
+                    <div key={rez.id} className="border rounded-lg p-3 mb-2 flex gap-3 items-start flex-wrap">
                       <input type="checkbox" checked={izabraneStavke.has(rez.id)} onChange={() => setIzabraneStavke(prev => { const n = new Set(prev); n.has(rez.id) ? n.delete(rez.id) : n.add(rez.id); return n })} />
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-[140px]">
                         <p className="font-medium">{labelArtikla(rez.poklopci_artikli || {})}</p>
-                        <p className="text-sm">{rez.kolicina} × {cenaStavke(rez).toFixed(2)} €</p>
+                        <p className="text-sm">{rez.kolicina} × {cenaStavke(rez).toFixed(2)} € = <strong>{(rez.kolicina * cenaStavke(rez)).toFixed(2)} €</strong></p>
                       </div>
-                      <button onClick={() => razduziStavke([rez], true)} className="text-sm px-3 py-1 bg-green-600 text-white rounded">Plaćeno</button>
-                      <button onClick={() => razduziStavke([rez], false)} className="text-sm px-3 py-1 bg-orange-600 text-white rounded">Vrati</button>
+                      <div className="flex flex-col gap-1">
+                        <button type="button" onClick={() => otvoriIzmenuStavke(rez)} className="text-sm px-3 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 rounded flex items-center gap-1">
+                          <PencilSquareIcon className="w-4 h-4" /> Izmeni
+                        </button>
+                        <button onClick={() => razduziStavke([rez], true)} className="text-sm px-3 py-1 bg-green-600 text-white rounded">Plaćeno</button>
+                        <button onClick={() => razduziStavke([rez], false)} className="text-sm px-3 py-1 bg-orange-600 text-white rounded">Vrati</button>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDelimicnoPlacanje && osobaDetalj && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold text-blue-600">Delimično plaćanje</h3>
+              <button onClick={() => setShowDelimicnoPlacanje(false)}><XMarkIcon className="w-6 h-6" /></button>
+            </div>
+            <p className="text-sm text-slate-500">{osobaDetalj.kome} · preostalo: <strong>{osobaDetalj.preostalo.toFixed(2)} €</strong></p>
+            <input type="number" step="0.01" min="0.01" max={osobaDetalj.preostalo} placeholder="Iznos €" value={delimicnoIznos}
+              onChange={e => setDelimicnoIznos(e.target.value)} className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700" autoFocus />
+            <textarea rows={2} placeholder="Napomena" value={delimicnoNapomena} onChange={e => setDelimicnoNapomena(e.target.value)}
+              className="w-full px-4 py-3 border rounded-lg dark:bg-gray-700" />
+            <div className="flex gap-3">
+              <button onClick={() => setShowDelimicnoPlacanje(false)} className="flex-1 py-2 bg-gray-200 rounded-lg">Otkaži</button>
+              <button onClick={evidentirajDelimicnoPlacanje} disabled={loading} className="flex-1 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60">
+                {loading ? 'Čuvam...' : 'Evidentiraj'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showIzmenaStavke && izmenaStavkaRez && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold text-blue-600">Izmeni stavku</h3>
+              <button onClick={() => setShowIzmenaStavke(false)}><XMarkIcon className="w-6 h-6" /></button>
+            </div>
+            <p className="font-medium">{labelArtikla(izmenaStavkaRez.poklopci_artikli || {})}</p>
+            <p className="text-sm text-slate-500">Za: {izmenaStavkaRez.kome}</p>
+            <div>
+              <label className="text-sm text-slate-600">Količina</label>
+              <input type="number" min="1" value={izmenaKolicina} onChange={e => setIzmenaKolicina(Number(e.target.value))}
+                className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700" />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Cena po komadu (€)</label>
+              <input type="number" step="0.01" min="0.01" value={izmenaCena} onChange={e => setIzmenaCena(Number(e.target.value))}
+                className="w-full mt-1 px-4 py-3 border rounded-lg dark:bg-gray-700" />
+            </div>
+            <p className="text-sm bg-slate-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
+              Ukupno: <strong>{(Number(izmenaKolicina) * Number(izmenaCena)).toFixed(2)} €</strong>
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowIzmenaStavke(false)} className="flex-1 py-2 bg-gray-200 rounded-lg">Otkaži</button>
+              <button onClick={sacuvajIzmenuStavke} disabled={loading} className="flex-1 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60">
+                {loading ? 'Čuvam...' : 'Sačuvaj'}
+              </button>
             </div>
           </div>
         </div>
